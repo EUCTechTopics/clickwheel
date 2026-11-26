@@ -18,8 +18,15 @@ HAVE=$(shasum -a 256 "$IMG" | cut -d' ' -f1)
 PART=$("$ROOT/scripts/find_ipod.sh" "$@")
 DISK=${PART%s*}
 
+MODEL=$("$ROOT/scripts/ipod_model.sh" "$PART")
+[[ "$MODEL" == 4g || "$MODEL" == unknown ]] || { echo "ABORT: this iPod is identified as '$MODEL', not an iPod 4G (BoardHwName iPod Q21); for an iPod photo use the *_photo.sh scripts."; exit 1; }
+
 # Nothing on the iPod may be mounted while writing.
 diskutil unmountDisk "/dev/$DISK"
+
+# The device must already hold firmware of the same model as the image (same osos image length in
+# its directory). This works without the data volume, so it also protects a rollback.
+/usr/bin/python3 -I "$ROOT/scripts/same_model.py" "/dev/r$PART" "$IMG" || exit 1
 
 echo "Writing $IMG -> /dev/r$PART"
 dd if="$IMG" of="/dev/r$PART" bs=1m

@@ -5,11 +5,11 @@ description: Guide me through safely patching my iPod firmware (Genres → Label
 Walk me through patching my iPod with this repository, following the workflow and hard rules in
 `CLAUDE.md` exactly:
 
-1. Start read-only with `scripts/ipod_info.sh` and confirm the device with me (iPod 4G or
-   iPod Video 5G).
-2. Have me run the backup myself (`! sudo scripts/backup_fw.sh`, or `backup_fw_5g.sh diskNs2` on an
-   iPod Video) and check that it was verified.
-3. Run `python3 scripts/patch.py --check`, then show me the patch plan and wait for my "yes".
+1. Start read-only with `scripts/ipod_info.sh` and confirm the device with me (iPod 4G,
+   iPod photo or iPod Video 5G).
+2. Have me run the backup myself (`! sudo scripts/backup_fw.sh`, `backup_fw_photo.sh diskNs2` on an
+   iPod photo, or `backup_fw_5g.sh diskNs2` on an iPod Video) and check that it was verified.
+3. Run `python3 scripts/patch.py --check` (with `--photo` or `--5g` as needed), then show me the patch plan and wait for my "yes".
 4. Build the patched copy and check that only the planned bytes changed.
 5. Explain recovery, then have me run the write myself and tell me how to reboot and what to test.
 

@@ -148,3 +148,46 @@ appears in the 8 bytes after the table.
 #240 and #211 are identical except for the list they build. The 5G composer patch changes the
 operand of #248's last `NAME` from `0x1069` to `0x104C`: one byte at `osos+0x4BA8FA`
 (partition `0x4BEEFA`), `69` → `4C`.
+
+## iPod photo / iPod color port (firmware 1.2.1)
+
+Ported without a device dump: Apple's updater `iPod_11.1.2.1.ipsw` (identical to `iPod_5.1.2.1`,
+manifest `FamilyID 5`, `BuildID 0x04218000`) contains `Firmware-11.4.2.1`, which is laid out exactly
+like the partition: `]ih[` header, directory at `0x4200`, `osos` at partition `0x4600`. On the device,
+`patch.py --photo --check` compares the user's `osos` with the stock image's SHA-256
+(`9321189b…c6fadc`) and, more importantly, checks every patch location byte for byte.
+
+| What | iPod photo 1.2.1 |
+|---|---|
+| `osos` length / stock checksum | `0x523514` / `0x1DE43EC5` |
+| Other images | `aupd` at partition `0x527E00` (no `rsrc`, no `hibe`) |
+| English strings | around `osos+0x26D000` (French and Dutch blocks before it also contain "Genres") |
+| Opcode spec table | `osos+0x501AE0` (identical to the 4G's) |
+| Script function table | `osos+0x26FBF8`, 712 × u32, followed by u32 `0x108DB`, u32 `0x30000` |
+| Bytecode base | table end + 8 = `0x270720` |
+| Global name of function *i* | `0x8DB + i` (the low bits of the `0x108DB` trailer, as on the 4G `0x10737` and 5G `0x10F79`) |
+| Library object | name `0xBB1`; select props are the 4G's `+5` (artist `0xED`, composer `0xEE`, album `0xEF`, genre `0xF0`) |
+
+How the table was found: the 4G and 5G both end their function table with `u32 0x10000 + name base`,
+`u32 0x30000`. Searching for that pair finds one long ascending offset table in the Photo image.
+The same scan, with the 4G's known table, reproduces every 4G value in this document.
+
+Browse handlers (the "item picked" handlers are found with one pattern, which also finds the
+4G `#268` and 5G `#248` handlers at their documented offsets):
+
+| Category | Open list (builds) | List descriptor → `setRoot(n)` | Item picked (UI cmd) → opens |
+|---|---|---|---|
+| artist | #273 `0x9EC` (`0x101`) | #274 → 1 | #275 (`0x3318`) → `0x9D9` albums |
+| composer | #246 `0x9D1` (`0x102`) | #248 → 2 | #249 (`0x3319`) → `0x9D9` albums |
+| album | #254 `0x9D9` (`0x103`) | #258 → 3 | #259 (`0x331A`) → `0x9C8` songs |
+| genre | #279 `0x9F2` (`0x105`) | #280 → 0 | **#281 (`0x331B`) → `0x9EC` artists** |
+
+The list descriptors pass the script category to the library's set-root method (prop `0x100` here,
+`0xFB` on the 4G): genre 0, artist 1, composer 2, album 3. That, and the chain
+opener → descriptor → picked handler (same as the 4G's #236 → #238 → #239), identifies #246 as
+"open Composers". The composer patch changes the operand of #281's last `NAME` from `0x09EC` to
+`0x09D1`: one byte at `osos+0x275A88` (partition `0x27A088`), `EC` → `D1`.
+
+String offsets (partition): "Genres" `0x27176C`, `0x271D88`, `0x2735E2`, `0x2737C4`, `0x273DA0`;
+"Composers" `0x271774`, `0x271D6C`, `0x2735D2`, `0x2737B8`, `0x273DD4`. A full build changes 7
+sectors (`0x4200` for the checksum, the rest inside `osos`).

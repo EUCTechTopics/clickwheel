@@ -11,6 +11,9 @@ OUTDIR="$ROOT/firmware"; mkdir -p "$OUTDIR"
 OUT="$OUTDIR/ipod_fw_backup.bin"
 [[ -e "$OUT" ]] && { echo "ABORT: $OUT already exists; refusing to overwrite your backup."; exit 1; }
 
+MODEL=$("$ROOT/scripts/ipod_model.sh" "$PART")
+[[ "$MODEL" == 4g || "$MODEL" == unknown ]] || { echo "ABORT: this iPod is identified as '$MODEL', not an iPod 4G (BoardHwName iPod Q21); for an iPod photo use the *_photo.sh scripts."; exit 1; }
+
 # Nothing on the iPod may be mounted while we read it.
 diskutil unmountDisk "/dev/${PART%s*}"
 

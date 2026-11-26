@@ -9,3 +9,7 @@ firmware/*
 
 .DS_Store
 __pycache__/
+
+# Clickwheel app build output
+app/.build/
+app/build/

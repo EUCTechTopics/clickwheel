@@ -23,6 +23,9 @@ diskutil info "$DISK" | grep -q "Media Name:.*iPod" || { echo "ABORT: $DISK is n
 diskutil info "$PART" | grep -q "Partition Type:.*Apple_MDFW" || { echo "ABORT: $PART is not Apple_MDFW"; exit 1; }
 diskutil info "$PART" | grep -q "($EXPECTED Bytes)" || { echo "ABORT: $PART is not $EXPECTED bytes"; exit 1; }
 
+MODEL=$("$ROOT/scripts/ipod_model.sh" "$PART")
+[[ "$MODEL" == 5g || "$MODEL" == unknown ]] || { echo "ABORT: this iPod is identified as '$MODEL', not an iPod Video (5G)."; exit 1; }
+
 # Nothing on the iPod may be mounted while writing.
 diskutil unmountDisk "/dev/$DISK"
 

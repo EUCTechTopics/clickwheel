@@ -1,11 +1,13 @@
 # CLAUDE.md: guide for Claude Code in this repository
 
-This repo patches the Apple firmware of click-wheel iPods. It supports two models:
+This repo patches the Apple firmware of click-wheel iPods. It supports three models:
 
 - **iPod 4th generation** (click wheel, "iPod Q21") with firmware 3.1.1: **tested on a device**.
 - **iPod Video (5th generation)**, one firmware build (`osos` 0x735A00 bytes): **tested on a device**.
+- **iPod photo / iPod color** ("iPod P98") with firmware 1.2.1 (buildID 4.2.1): **tested on a device**
+  (MA079, all three patches).
 
-The patches, available on both models, are:
+The patches, available on all models, are:
 
 1. `--labels`: the English menu label **Genres** becomes **Labels**.
 2. `--composers`: picking a genre/label shows **Composers** instead of **Artists**
@@ -25,12 +27,12 @@ changes something.
   `rollback_fw.sh`) are run **by the user**, by typing `! sudo scripts/<script>` in the Claude
   Code prompt. You can't enter their password, and device writes must stay their decision.
   Never run `dd`, `diskutil eraseDisk/partitionDisk`, or anything else that writes to `/dev/*`.
-- **Never modify or delete `firmware/ipod_fw_backup.bin` or `firmware/ipod5g_fw_backup.bin`**, or
-  their `.sha256` files. They're the only way back.
+- **Never modify or delete `firmware/ipod_fw_backup.bin`, `firmware/ipod5g_fw_backup.bin` or
+  `firmware/ipodphoto_fw_backup.bin`**, or their `.sha256` files. They're the only way back.
 - **Patch copies only.** `scripts/patch.py` writes a new file and refuses to overwrite. Don't
   bypass its checks, and don't hand-edit firmware bytes outside it.
-- **Unsupported device or firmware → stop.** If the iPod is neither a 4G (`iPod Q21`, 3.1.1) nor
-  an iPod Video whose dump passes `patch.py --5g --check`, if it's Windows-formatted (no
+- **Unsupported device or firmware → stop.** If the iPod is not a 4G (`iPod Q21`, 3.1.1), an
+  iPod photo (`iPod P98`, buildID 4.2.1) or an iPod Video whose dump passes `patch.py --5g --check`, if it's Windows-formatted (no
   `Apple_MDFW` partition), or if `--check` reports `mismatch`, explain that the patch doesn't
   apply and don't continue. Offsets are
   firmware-specific. Porting is possible (see `docs/REVERSE_ENGINEERING.md`), but only as a
@@ -44,6 +46,9 @@ changes something.
 Run `scripts/ipod_info.sh`. Confirm with the user:
 - the firmware partition (e.g. `disk6s2`, type `Apple_MDFW`, 33,554,432 bytes),
 - `BoardHwName: iPod Q21` and `buildID ... (3.1.1)` from SysInfo.
+
+`ipod_info.sh` prints the detected model. `BoardHwName: iPod P98` with `buildID ... (4.2.1)` is an
+**iPod photo**: continue with the iPod photo workflow at the end of this file (the 4G scripts refuse it).
 
 If `ipod_info.sh` reports a partition that isn't 33,554,432 bytes, check with
 `diskutil list external` and `diskutil info diskNs2`. A **67,108,864-byte** `Apple_MDFW` partition
@@ -124,6 +129,26 @@ Same workflow and the same rules, with these differences:
 - Undo: `! sudo scripts/rollback_fw_5g.sh diskNs2`.
 - Reboot and test as for the 4G.
 
+### iPod photo / iPod color
+Same workflow and the same rules. The 4G scripts refuse an iPod photo (same 32 MiB partition), so:
+
+- Confirm `BoardHwName: iPod P98` and `buildID ... (4.2.1)` (shown as 1.2.1), and the partition.
+- Back up: `! sudo scripts/backup_fw_photo.sh diskNs2` → `firmware/ipodphoto_fw_backup.bin`.
+- Check / build: `python3 scripts/patch.py --photo --check` (it also says whether the `osos` image is
+  identical to Apple's stock 1.2.1 image), then
+  `python3 scripts/patch.py --photo --labels --composers [--producers]` → `firmware/ipodphoto_fw_patched.bin`.
+- Write: `! sudo scripts/write_fw_photo.sh diskNs2` (only the differing 512-byte sectors).
+- Undo: `! sudo scripts/rollback_fw_photo.sh diskNs2`.
+- Reboot and test as for the 4G.
+
+### The Clickwheel app (GUI)
+`app/` holds a native macOS app (SwiftUI) that runs the same scripts: `app/build_app.sh`, then
+`open app/build/Clickwheel.app`. It only does read-only work by itself; backup, write and rollback
+open a Terminal window running the `sudo scripts/…` command (after a confirmation dialog), where the
+user types their password. (Starting the scripts through `osascript … with administrator privileges`
+fails: macOS blocks raw disk access for them with "Operation not permitted".)
+If the user prefers the app, explain that, and don't run it to change anything for them.
+
 ## Repository map
 
 | Path | What it is |
@@ -135,6 +160,10 @@ Same workflow and the same rules, with these differences:
 | `scripts/write_fw.sh` | sudo: writes an image (checks its `.sha256`, partition type and size), reads it back |
 | `scripts/rollback_fw.sh` | sudo: writes the original backup back |
 | `scripts/backup_fw_5g.sh`, `write_fw_5g.sh`, `rollback_fw_5g.sh` | sudo, iPod Video 5G (`--5g`): backup; write/undo only the differing sectors (leaves the hibernation image alone) via `write_sectors.py` |
+| `scripts/backup_fw_photo.sh`, `write_fw_photo.sh`, `rollback_fw_photo.sh` | sudo, iPod photo (`--photo`): same approach as the 5G scripts |
+| `scripts/ipod_model.sh` | Read-only: `4g`, `5g`, `photo` or `unknown` for a partition (SysInfo, else size); the sudo scripts refuse a mismatch |
+| `scripts/same_model.py` | Read-only: refuses a full-partition write (4G) when the device holds a different model's firmware |
+| `app/` | Clickwheel, the macOS GUI (SwiftUI). `app/build_app.sh` builds `app/build/Clickwheel.app` |
 | `firmware/` | Firmware dumps and outputs. Git-ignored: contains Apple's firmware, never commit it. |
 | `docs/REVERSE_ENGINEERING.md` | How the patches were found; offsets and structures for extending them |
 
@@ -143,7 +172,8 @@ Same workflow and the same rules, with these differences:
 To find strings for a new rename, use the read-only `python3 scripts/patch.py [--5g] --find "Text"`.
 It lists every occurrence with context and how many bytes each slot allows. Only rename the
 English UI block (where the existing rename offsets are), with the same length or shorter.
-To add a patch, add an entry to the model's `patches` in `MODELS` (`scripts/patch.py`) with exact original bytes and
+`python3 scripts/patch.py --photo --plan --json --labels` shows a build as JSON without writing
+(the app uses this). To add a patch, add an entry to the model's `patches` in `MODELS` (`scripts/patch.py`) with exact original bytes and
 enough surrounding context to reject other firmware builds, and document it in `README.md`.
 Background (script VM, method descriptors, category numbers, handler functions) is in
 `docs/REVERSE_ENGINEERING.md`. Only change behaviour that can be verified statically, and ask the

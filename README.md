@@ -1,11 +1,12 @@
 # Clickwheel
 
-> Firmware patches for **click-wheel iPods**, the **iPod 4th generation** and the
-> **iPod Video (5th generation)**, that turn the *Genres* menu into a **Labels** browser.
-> Built to be run with **Claude Code**, which guides you step by step.
+> Firmware patches for **click-wheel iPods** (the **iPod 4th generation**, the **iPod photo / color**
+> and the **iPod Video (5th generation)**) that turn the *Genres* menu into a **Labels** browser.
+> Use the native **Clickwheel** Mac app, or let **Claude Code** guide you step by step.
 
 ![iPod 4G](https://img.shields.io/badge/iPod%204G-tested%20on%20device-brightgreen)
 ![iPod Video 5G](https://img.shields.io/badge/iPod%20Video%205G-tested%20on%20device-brightgreen)
+![iPod photo](https://img.shields.io/badge/iPod%20photo-tested%20on%20device-brightgreen)
 ![platform](https://img.shields.io/badge/host-macOS-black)
 ![claude code](https://img.shields.io/badge/guided%20by-Claude%20Code-d97757)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -45,16 +46,16 @@ The image checksum is recalculated in every case.
 
 ## Compatibility
 
-| | iPod 4th generation | iPod Video (5th generation) |
-|---|---|---|
-| Status | **Tested on a device** | **Tested on a device** |
-| Identify | `BoardHwName: iPod Q21` (tested: M9282) | 64 MiB `Apple_MDFW` firmware partition |
-| Firmware | Apple **3.1.1** | The build whose `osos` image is `0x735A00` bytes (checked by `--check`) |
-| Patch flag | (default) | `--5g` |
-| Scripts | `backup_fw.sh`, `write_fw.sh`, `rollback_fw.sh` | `backup_fw_5g.sh`, `write_fw_5g.sh`, `rollback_fw_5g.sh` |
-| Storage mods | Works with iFlash (tested) | Not tested |
+| | iPod 4th generation | iPod photo / iPod color | iPod Video (5th generation) |
+|---|---|---|---|
+| Status | **Tested on a device** | **Tested on a device** (MA079) | **Tested on a device** |
+| Identify | `BoardHwName: iPod Q21` (tested: M9282) | `BoardHwName: iPod P98` (e.g. MA079) | 64 MiB `Apple_MDFW` firmware partition |
+| Firmware | Apple **3.1.1** | Apple **1.2.1** (buildID 4.2.1) | The build whose `osos` image is `0x735A00` bytes (checked by `--check`) |
+| Patch flag | (default) | `--photo` | `--5g` |
+| Scripts | `backup_fw.sh`, `write_fw.sh`, `rollback_fw.sh` | `backup_fw_photo.sh`, `write_fw_photo.sh`, `rollback_fw_photo.sh` | `backup_fw_5g.sh`, `write_fw_5g.sh`, `rollback_fw_5g.sh` |
+| Storage mods | Works with iFlash (tested) | Not tested | Not tested |
 
-On both models:
+On all models:
 
 | | |
 |---|---|
@@ -69,7 +70,29 @@ firmware version, another model, a corrupt dump) it stops without writing.
 
 ---
 
-## Quick start with Claude Code (recommended)
+## The Clickwheel app
+
+A native macOS app (SwiftUI, macOS 14+) for the whole workflow: it detects the iPod, makes the
+verified backup, shows each patch with its byte-level diff, partition map and new checksum, and
+previews the result on an animated iPod screen. It runs the same scripts as the command line.
+
+```sh
+app/build_app.sh                 # needs Xcode or the Command Line Tools (swift)
+open app/build/Clickwheel.app
+```
+
+- **Read-only by itself:** device detection (`diskutil`, SysInfo) and `patch.py --check/--plan`.
+- **Backup, write and rollback** open a Terminal window that runs the `sudo scripts/*.sh` command,
+  after a confirmation dialog in the app. You type your password in Terminal (the app never sees
+  it); the app picks up the output and continues.
+- Why Terminal: macOS blocks raw disk access (`dd: /dev/rdiskNs2: Operation not permitted`) for
+  commands an app starts with `do shell script … with administrator privileges`, even with Full
+  Disk Access, while the same `sudo` command works from Terminal.
+- The first time, macOS asks whether Clickwheel may read files on a removable volume. That's for
+  `iPod_Control/Device/SysInfo` (model and firmware version).
+- The **Console** page logs every command and its output.
+
+## Quick start with Claude Code
 
 ```sh
 git clone https://github.com/EUCTechTopics/clickwheel.git
@@ -116,7 +139,16 @@ python3 scripts/patch.py --5g --labels --composers     # -> firmware/ipod5g_fw_p
 sudo scripts/write_fw_5g.sh diskNs2                    # writes only the sectors that differ
 ```
 
-All scripts auto-detect the iPod's firmware partition. If more than one iPod is connected, pass
+On an **iPod photo / iPod color** (firmware 1.2.1), use `--photo` and the `_photo` scripts:
+
+```sh
+sudo scripts/backup_fw_photo.sh diskNs2                # backup -> firmware/ipodphoto_fw_backup.bin
+python3 scripts/patch.py --photo --check
+python3 scripts/patch.py --photo --labels --composers  # -> firmware/ipodphoto_fw_patched.bin
+sudo scripts/write_fw_photo.sh diskNs2                 # writes only the sectors that differ
+```
+
+The 4G scripts auto-detect the iPod's firmware partition. If more than one iPod is connected, pass
 the partition explicitly, e.g. `sudo scripts/write_fw.sh firmware/ipod_fw_patched.bin disk6s2`.
 
 ---
@@ -186,10 +218,26 @@ hibernation image, so 5G images are written with `write_fw_5g.sh`, which writes 
 sectors that differ (all inside `osos`) and leaves the rest alone. Undo with
 `sudo scripts/rollback_fw_5g.sh diskNs2`.
 
+### iPod photo / iPod color: `--photo`
+
+All three patches, for firmware 1.2.1 (`osos` image `0x523514` bytes, checksum `0x1DE43EC5` stock).
+Offsets are into the 32 MiB partition:
+
+| Patch | Offset | Old | New |
+|---|---|---|---|
+| `--labels` | `0x27176C`, `0x271D88`, `0x2735E2`, `0x2737C4`, `0x273DA0` | `Genres` | `Labels` |
+| `--composers` | `0x27A088` | `EC` | `D1` (genre handler #281 calls *open Composers* `0x9D1` instead of *open Artists* `0x9EC`) |
+| `--producers` | `0x271774`, `0x271D6C`, `0x2735D2`, `0x2737B8`, `0x273DD4` | `Composers` | `Producers` |
+
+Checksums: `--labels` `0x1DE43E70`, `--composers` `0x1DE43EAA`, `--labels --composers`
+`0x1DE43E55`, all three `0x1DE43E41`. These offsets were found in Apple's own 1.2.1 updater image; all three
+patches together were confirmed on a device (MA079). `--check` verifies every byte against *your*
+backup first.
+
 ## How it works
 
-On both models, the UI is partly written as **bytecode for a small JavaScript-style VM**
-inside the firmware. The 5G uses the same VM, with its tables at different offsets. Each browse category has its own small script handlers. When you pick a genre, the
+On all three models, the UI is partly written as **bytecode for a small JavaScript-style VM**
+inside the firmware. The 5G and the iPod photo use the same VM, with their tables at different offsets. Each browse category has its own small script handlers. When you pick a genre, the
 handler records the selection and then calls a global "open Artists list" function. Patch 2
 points that call at the "open Composers list" function instead. The composer list is built with
 the same library query as the artist list, and picking a composer keeps the genre selected, so
@@ -227,7 +275,11 @@ A Finder/iTunes **firmware update or restore** removes the patches. Just run the
 │   ├── write_fw.sh           # sudo: write an image, read it back and compare
 │   ├── rollback_fw.sh        # sudo: write the original backup back
 │   ├── *_5g.sh               # sudo: iPod Video backup / write / rollback
-│   └── write_sectors.py      # helper: write only the sectors that differ (5G)
+│   ├── *_photo.sh            # sudo: iPod photo backup / write / rollback
+│   ├── ipod_model.sh         # read-only: which model is this partition?
+│   ├── same_model.py         # read-only: device and image are the same model (4G write)
+│   └── write_sectors.py      # helper: write only the sectors that differ (5G, photo)
+├── app/                      # Clickwheel.app (SwiftUI); build with app/build_app.sh
 ├── docs/REVERSE_ENGINEERING.md
 └── firmware/                 # your dumps and outputs (git-ignored)
 ```
@@ -242,6 +294,8 @@ content-checked patches, and Claude Code as the guide.
 - [x] Menu renames: Genres → Labels, Composers → Producers
 - [x] Browse-order change: Label → Composers
 - [x] `patch.py --find TEXT`: read-only string search showing how many bytes each slot allows
+- [x] iPod photo / color (1.2.1) port, tested on a device
+- [x] Native Mac app (Clickwheel.app) with diff view, partition map and live menu preview
 - [ ] **Custom renames:** `--rename OLD=NEW` for any English menu string that fits its slot,
       with the same content checks
 - [ ] Patch catalogue as data (one file per model/firmware) instead of code
@@ -261,7 +315,7 @@ reject other firmware builds, and a test on a real device.
 - `--producers` only renames menu text; it uses the same mechanism as `--labels`, which is
   confirmed on a device.
 - The 5G offsets were found on one 5G firmware build. Other 5G builds are rejected by `--check`.
-- One firmware build per model: 3.1.1 on the 4G and one 5G build. Porting to other versions
+- One firmware build per model: 3.1.1 on the 4G, 1.2.1 on the iPod photo and one 5G build. Porting to other versions
   means finding the offsets again. The notes explain the method.
 
 ## License
