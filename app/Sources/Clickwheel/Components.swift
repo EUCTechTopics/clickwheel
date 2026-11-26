@@ -21,27 +21,6 @@ enum Theme {
     static let monoTiny = Font.system(size: 10, design: .monospaced)
 }
 
-extension StepStatus {
-    var color: Color {
-        switch self {
-        case .todo: return .secondary.opacity(0.35)
-        case .ready: return .accentColor
-        case .done: return Theme.phosphor
-        case .warn: return Theme.amber
-        case .blocked: return .red
-        }
-    }
-    var label: String {
-        switch self {
-        case .todo: return "waiting"
-        case .ready: return "ready"
-        case .done: return "done"
-        case .warn: return "check"
-        case .blocked: return "stopped"
-        }
-    }
-}
-
 /// A small glowing status LED.
 struct LED: View {
     var color: Color
@@ -99,24 +78,6 @@ struct SpecRow: View {
                 .lineLimit(1).truncationMode(.middle).minimumScaleFactor(0.85)
         }
         .font(Theme.monoSmall)
-    }
-}
-
-/// Page header: big step number + title + one-line subtitle.
-struct PageHeader: View {
-    var step: Step
-    var subtitle: String
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 14) {
-            Text(step.number)
-                .font(.system(size: 34, weight: .bold, design: .monospaced))
-                .foregroundStyle(.tertiary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(step.title).font(.largeTitle.weight(.bold))
-                Text(subtitle).foregroundStyle(.secondary)
-            }
-        }
-        .padding(.bottom, 4)
     }
 }
 

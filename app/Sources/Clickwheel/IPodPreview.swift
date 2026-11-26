@@ -56,9 +56,6 @@ struct IPodPreview: View {
             .font(Theme.monoTiny)
             .lineLimit(1)
             .minimumScaleFactor(0.7)
-            Text("drag wheel · click · MENU = back")
-                .font(.system(size: 9.5, design: .monospaced))
-                .foregroundStyle(.tertiary)
         }
         .task(id: "\(patched)|\(patches.map(\.rawValue).sorted())") {
             screen = 0
@@ -224,47 +221,20 @@ struct IPodPreview: View {
     }
 }
 
-/// The right-hand inspector: preview + a stock/patched switch + the model "label plate".
-struct PreviewPanel: View {
+/// Next to the switches: the iPod's menus as they will be with the current selection.
+/// (Drag around the wheel to scroll, click the centre button, press MENU to go back.)
+struct PreviewColumn: View {
     @Environment(AppState.self) private var state
-    enum Mode: Hashable { case stock, device, selection }
-    @State private var mode: Mode = .selection
-
-    private var devicePatches: Set<PatchID> {
-        Set(state.deviceState?.applied.compactMap(PatchID.init(rawValue:)) ?? [])
-    }
 
     var body: some View {
-        VStack(spacing: 18) {
-            Picker("", selection: $mode) {
-                Text("Stock").tag(Mode.stock)
-                Text("On iPod").tag(Mode.device)
-                Text("Selection").tag(Mode.selection)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 240)
-            .help("Stock firmware · what the iPod runs now · the patches selected in step 03")
-
-            IPodPreview(model: state.model,
-                        patches: mode == .device ? devicePatches : state.selected,
-                        patched: mode != .stock && !(mode == .device && devicePatches.isEmpty))
-
-            VStack(alignment: .leading, spacing: 5) {
-                SpecRow(key: "model", value: state.device?.modelNumber ?? (state.model == nil ? "no iPod" : "—"))
-                SpecRow(key: "board", value: state.device?.board ?? "—")
-                SpecRow(key: "firmware", value: state.device?.firmwareVersion ?? state.model?.firmware ?? "—")
-                SpecRow(key: "patches", value: state.selected.isEmpty ? "none" : PatchID.allCases.filter { state.selected.contains($0) }.map { String($0.rawValue.prefix(3)) }.joined(separator: "+"))
-                if let c = state.check?.osos?.checksum {
-                    SpecRow(key: "sum", value: hex32(c))
-                    if let n = state.plan?.new_checksum { SpecRow(key: "sum'", value: hex32(n), valueColor: Theme.phosphor) }
-                }
-            }
-            .padding(12)
-            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10))
-            Spacer()
+        VStack {
+            Spacer(minLength: 20)
+            IPodPreview(model: state.model, patches: state.selected, patched: !state.selected.isEmpty)
+                .help("Try it: drag around the wheel, click the centre button, press MENU to go back.")
+            Spacer(minLength: 20)
         }
-        .padding(.top, 20)
         .padding(.horizontal, 14)
+        .frame(maxHeight: .infinity)
+        .background(.background.secondary)
     }
 }

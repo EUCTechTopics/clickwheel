@@ -31,6 +31,7 @@ All patches are tiny in-place byte changes, and you can pick any combination:
 | `--labels` | *Genres* → *Labels* (English menus) | 5 strings |
 | `--composers` | Picking a label shows Composers instead of Artists | 1 byte |
 | `--producers` | *Composers* → *Producers* (English menus) | 5 strings |
+| `--logo` | iPod photo / color only: the boot Apple logo upside down (it lives in the `aupd` image; tested on a device) | 15,600 bytes |
 
 The image checksum is recalculated in every case.
 
@@ -72,29 +73,39 @@ firmware version, another model, a corrupt dump) it stops without writing.
 
 ## The Clickwheel app
 
-A native macOS app (SwiftUI, macOS 14+) for the whole workflow: it detects the iPod, makes the
-verified backup, shows each patch with its byte-level diff, partition map and new checksum, and
-previews the result on an animated iPod screen. It runs the same scripts as the command line.
+A native macOS app (SwiftUI, macOS 14+) for people who'd rather not use the command line. One
+window per iPod, like Finder's device page: the three changes as switches, an animated iPod that
+shows the result, and an **Apply** button. Switching everything off puts Apple's original menus back.
 
 ```sh
 app/build_app.sh                 # needs Xcode or the Command Line Tools (swift)
 open app/build/Clickwheel.app
 ```
 
-- **Read-only by itself:** device detection (`diskutil`, SysInfo) and `patch.py --check/--plan`.
-- **Backup, write and rollback** open a Terminal window that runs the `sudo scripts/*.sh` command,
-  after a confirmation dialog in the app. You type your password in Terminal (the app never sees
-  it); the app picks up the output and continues.
-- Why Terminal: macOS blocks raw disk access (`dd: /dev/rdiskNs2: Operation not permitted`) for
+- **Apply** asks for your Mac password once (macOS's own dialog, `/usr/libexec/authopen`), which
+  gives Clickwheel a handle to the firmware partition and nothing else. The app never sees your
+  password and nothing runs as root. Then it:
+  1. checks the iPod and unmounts it (`scripts/write_fd.py prepare`);
+  2. reads the firmware partition twice and compares (`scripts/backup_fd.py dump`);
+  3. builds your selection from that read with `patch.py --exact`;
+  4. writes only the sectors that differ, inside the osos area, and reads them back
+     (`scripts/write_fd.py write`, via `write_sectors.apply`). The iPod must still hold what was read.
+- **No safety copy in the repository.** The app keeps the iPod's firmware, as last read or written
+  and verified, in `~/Library/Application Support/Clickwheel/<serial>/ipod.bin`. Undo means switching
+  everything off: `patch.py` holds the original bytes of every change, and for the iPod photo the
+  result is checked against Apple's original software. If a write is interrupted, the image is kept
+  as `pending.bin` and the next Apply finishes it.
+- **Check** (Details ▸ Read from iPod) reads the iPod the same way and shows which changes are on it.
+- Why `authopen`: macOS blocks raw disk access (`dd: /dev/rdiskNs2: Operation not permitted`) for
   commands an app starts with `do shell script … with administrator privileges`, even with Full
-  Disk Access, while the same `sudo` command works from Terminal.
+  Disk Access. `authopen` is Apple's own tool for opening a device after a password prompt.
 - The first time, macOS asks whether Clickwheel may read files on a removable volume. That's for
   `iPod_Control/Device/SysInfo` (model and firmware version).
-- **On this iPod** shows which patches the connected iPod runs. The app knows it exactly after a
-  backup, a write or a rollback (each one reads the iPod back), remembers it per iPod, and
-  **Read from iPod…** checks it again (read-only, `sudo scripts/device_state.sh MODEL diskNs2`).
-  Knowing what's installed also lets you switch to another patch combination without rolling back first.
-- The **Console** page logs every command and its output (also in `~/Library/Logs/Clickwheel.log`).
+- **Details & Log** (⌘I, or the ⓘ button) has the technical view: device facts, the firmware copy on
+  this Mac, the byte-level diff, partition map and new checksum, and the log of every command (also
+  in `~/Library/Logs/Clickwheel.log`).
+- The `sudo scripts/*.sh` commands (with their safety copies in `firmware/`) stay available for
+  working in Terminal.
 
 ## Quick start with Claude Code
 
@@ -151,6 +162,19 @@ python3 scripts/patch.py --photo --check
 python3 scripts/patch.py --photo --labels --composers  # -> firmware/ipodphoto_fw_patched.bin
 sudo scripts/write_fw_photo.sh diskNs2                 # writes only the sectors that differ
 ```
+
+**Removing patches.** A normal build only adds patches. With `--exact`, the patches you name are
+applied and every other patch is put back to its original bytes. This matters when your backup was
+made from an iPod that was already patched (`--check` then says `applied`, and the rollback scripts
+would restore those patches):
+
+```sh
+python3 scripts/patch.py --photo --exact --labels      # Labels only; Composers/Producers removed
+python3 scripts/patch.py --photo --exact               # no patches at all
+```
+
+For the iPod photo, the build also says whether the result is identical to Apple's stock `osos`
+image. Write the result with the usual write script. The Clickwheel app always builds with `--exact`.
 
 The 4G scripts auto-detect the iPod's firmware partition. If more than one iPod is connected, pass
 the partition explicitly, e.g. `sudo scripts/write_fw.sh firmware/ipod_fw_patched.bin disk6s2`.

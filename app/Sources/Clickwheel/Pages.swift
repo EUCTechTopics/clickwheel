@@ -1,114 +1,441 @@
 import SwiftUI
 
-private struct Page<Content: View>: View {
-    var step: Step
-    var subtitle: String
-    @ViewBuilder var content: Content
+// The main window: one screen per iPod, like Finder's device page. The iPod and what's on it at the
+// top, the changes as switches with a live preview, and one Apply button. Applying asks for the Mac
+// password once, reads the iPod, writes only what changes and reads it back. Progress and the result
+// show in place. The iPod's firmware is kept in ~/Library/Application Support/Clickwheel.
+// Everything technical (bytes, checksums, partitions, the log, rollback) lives in the Details window.
+
+struct MainView: View {
+    @Environment(AppState.self) private var state
+    @Environment(\.openWindow) private var openWindow
+
     var body: some View {
-        // The content width comes from the column, minus room reserved for a scroll bar. It must not
-        // depend on whether the scroll bar is showing: with "always visible" scroll bars (a mouse
-        // connected) that feedback made the page flip between two layouts forever.
-        GeometryReader { g in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    PageHeader(step: step, subtitle: subtitle)
-                    content
-                }
-                .frame(width: max(300, min(820, g.size.width - 2 * 28 - 16)), alignment: .leading)
-                .padding(.vertical, 28)
-                .padding(.leading, 28)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        @Bindable var state = state
+        Group {
+            switch state.phase {
+            case .searching: ProgressView("Looking for your iPod…").frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .connect: ConnectScreen()
+            case .unsupported(let why): UnsupportedScreen(reason: why)
+            case .ready: DeviceScreen()
             }
         }
-    }
-}
-
-// MARK: - 01 Device
-
-struct DevicePage: View {
-    @Environment(AppState.self) private var state
-
-    var body: some View {
-        Page(step: .device, subtitle: "Read-only. Finds the iPod's firmware partition and identifies the model.") {
-            if let d = state.device {
-                Card(title: "Connected", symbol: "cable.connector") {
-                    HStack(alignment: .top, spacing: 18) {
-                        Image(systemName: "ipod")
-                            .font(.system(size: 54, weight: .thin))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 70)
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(d.model?.displayName ?? "Unrecognised iPod").font(.title2.weight(.semibold))
-                            SpecRow(key: "board", value: d.board ?? "— (SysInfo not readable)")
-                            SpecRow(key: "model no.", value: d.modelNumber ?? "—")
-                            SpecRow(key: "firmware", value: [d.firmwareVersion, d.buildVersion.map { "build " + $0 }].compactMap { $0 }.joined(separator: " · ").ifEmpty("—"))
-                            SpecRow(key: "partition", value: "/dev/\(d.partition) · Apple_MDFW · \(d.partitionSize >> 20) MiB")
-                            SpecRow(key: "volume", value: d.mountPoint ?? "not mounted")
-                        }
-                    }
-                    HStack {
-                        Spacer()
-                        Button("Eject", systemImage: "eject") { Task { await state.eject() } }
-                    }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.snappy, value: state.phase)
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                if state.device != nil {
+                    Button("Eject", systemImage: "eject") { Task { await state.eject() } }
+                        .disabled(state.working)
+                        .help("Eject the iPod")
                 }
-                if d.model != nil { DeviceStateCard() }
-                verdict(d)
+                Button("Details", systemImage: "info.circle") { openWindow(id: "details") }
+                    .help("Technical details, log and expert tools")
+            }
+        }
+        .navigationTitle("Clickwheel")
+        .alert(item: $state.alert) { a in
+            if a.fullDiskAccess {
+                Alert(title: Text(a.title), message: Text(a.message),
+                      primaryButton: .default(Text("Open Privacy Settings")) { AppState.openFullDiskAccessSettings() },
+                      secondaryButton: .cancel(Text("Later")))
             } else {
-                Card {
-                    VStack(spacing: 10) {
-                        LED(color: .accentColor, pulsing: true)
-                        Text(state.scannedOnce ? "Waiting for an iPod…" : "Looking for iPods…").font(.title3.weight(.medium))
-                        Text("Connect a Mac-formatted click-wheel iPod. Clickwheel polls `diskutil` every 3 seconds.")
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 30)
-                }
-            }
-            Card(title: "Supported", symbol: "checklist") {
-                Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
-                    GridRow {
-                        Text("MODEL"); Text("BOARD"); Text("FIRMWARE"); Text("STATUS")
-                    }
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundStyle(.tertiary)
-                    ForEach(IPodModel.allCases) { m in
-                        GridRow {
-                            HStack(spacing: 6) {
-                                if state.model == m { LED(color: Theme.phosphor) } else { Circle().fill(.clear).frame(width: 8) }
-                                Text(m.displayName)
-                            }
-                            Text(m.board).font(Theme.monoSmall)
-                            Text(m.firmware).font(Theme.monoSmall)
-                            m.deviceTested ? Badge(text: "tested on device", color: Theme.phosphor) : Badge(text: "static analysis", color: Theme.amber)
-                        }
-                    }
-                }
+                Alert(title: Text(a.title), message: Text(a.message), dismissButton: .default(Text("OK")))
             }
         }
-    }
-
-    @ViewBuilder private func verdict(_ d: Device) -> some View {
-        if d.model == nil {
-            Callout(kind: .danger, text: "This iPod isn't a supported model (or its data volume isn't mounted so SysInfo can't be read). The patches change bytes at exact firmware offsets, so Clickwheel stops here. Mount the iPod in Finder and it will look again.")
-        } else if d.firmwareMatches == false {
-            Callout(kind: .danger, text: "This iPod runs a different firmware version than the one the patches were made for (\(d.model!.firmware)). Clickwheel stops here.")
-        } else {
-            Callout(kind: .ok, text: state.backupUsable ? "Supported model, and its verified backup is ready." : "Supported model. Next: make a verified backup of the firmware.")
-        }
-        if d.model != nil && d.firmwareMatches != false { NextButton(to: state.backupUsable ? .patches : .backup) }
     }
 }
 
-struct NextButton: View {
-    @Environment(AppState.self) private var state
-    var to: Step
+/// A centred column with a big symbol, a title and a short explanation.
+private struct Hero<Content: View>: View {
+    var symbol: String
+    var tint: Color = .accentColor
+    var title: String
+    var text: LocalizedStringKey
+    @ViewBuilder var content: Content
+
     var body: some View {
-        HStack {
-            Spacer()
-            Button { state.step = to } label: {
-                HStack(spacing: 6) { Text("Continue to \(to.title)"); Image(systemName: "arrow.right") }
+        ScrollView {
+            VStack(spacing: 18) {
+                Image(systemName: symbol)
+                    .font(.system(size: 54, weight: .light))
+                    .foregroundStyle(tint)
+                    .frame(height: 70)
+                Text(title).font(.largeTitle.weight(.semibold)).multilineTextAlignment(.center)
+                Text(text)
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                content
             }
+            .frame(maxWidth: 540)
+            .padding(.horizontal, 40)
+            .padding(.vertical, 60)
+            .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+// MARK: - No iPod / not supported
+
+struct ConnectScreen: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        Hero(symbol: "cable.connector", title: "Connect your iPod",
+             text: "Plug your click-wheel iPod into this Mac with its cable. Clickwheel finds it by itself.") {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Works with").font(.headline)
+                ForEach(IPodModel.allCases) { m in
+                    Label(m.displayName, systemImage: "checkmark").foregroundStyle(.secondary)
+                }
+                Text("The iPod must be set up for a Mac (not Windows).").font(.callout).foregroundStyle(.tertiary).padding(.top, 4)
+            }
+            .padding(.top, 10)
+        }
+    }
+}
+
+struct UnsupportedScreen: View {
+    @Environment(AppState.self) private var state
+    var reason: String
+    var body: some View {
+        Hero(symbol: "exclamationmark.triangle", tint: Theme.amber, title: "Clickwheel can't change this iPod",
+             text: LocalizedStringKey(reason)) {
+            if state.device != nil {
+                Button("Eject iPod", systemImage: "eject") { Task { await state.eject() } }
+                    .controlSize(.large)
+            }
+        }
+    }
+}
+
+// MARK: - The iPod
+
+struct DeviceScreen: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        DeviceHeader()
+                        if state.hasPending { PendingBanner() }
+                        ChangeList()
+                    }
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 28)
+                    .frame(maxWidth: 680, alignment: .leading)
+                    .frame(maxWidth: .infinity)
+                }
+                ActionBar()
+            }
+            Divider()
+            PreviewColumn()
+                .frame(width: 280)
+        }
+    }
+}
+
+/// The iPod's name, model and what's on it now.
+struct DeviceHeader: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 18) {
+            Image(systemName: "ipod")
+                .font(.system(size: 40, weight: .light))
+                .foregroundStyle(.secondary)
+                .frame(width: 64, height: 76)
+                .background(.background.secondary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            VStack(alignment: .leading, spacing: 5) {
+                Text(state.device?.volumeName ?? "iPod").font(.title.weight(.semibold)).lineLimit(1)
+                Text(facts).foregroundStyle(.secondary)
+                status
+            }
+        }
+    }
+
+    private var facts: String {
+        guard let d = state.device else { return "" }
+        var parts = [d.model?.displayName ?? "iPod"]
+        if let c = d.capacity { parts.append(ByteCountFormatter.string(fromByteCount: Int64(c), countStyle: .file)) }
+        if let v = d.firmwareVersion { parts.append("Software \(v)") }
+        return parts.joined(separator: " · ")
+    }
+
+    @ViewBuilder private var status: some View {
+        if state.checking || state.stage == .read {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini)
+                Text("Checking what's on your iPod…")
+            }
+            .font(.callout).foregroundStyle(.secondary)
+        } else if state.deviceState == nil {
+            HStack(spacing: 6) {
+                Text("Clickwheel hasn't read this iPod yet.")
+                Button("Check") { Task { await state.readDeviceState() } }
+                    .buttonStyle(.link)
+                    .disabled(state.working)
+                    .help("Reads the iPod (asks for your Mac password). Changes nothing.")
+            }
+            .font(.callout).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// An earlier install didn't complete: the next Apply finishes it.
+struct PendingBanner: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.amber).font(.title3)
+            Text("The last install didn't finish. Keep the iPod connected and press **Apply** to complete it.")
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(Theme.amber.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.amber.opacity(0.35), lineWidth: 0.5))
+    }
+}
+
+/// The three changes as switches, each saying whether applying adds or removes it.
+struct ChangeList: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(state.patchIDs.enumerated()), id: \.element) { i, p in
+                if i > 0 { Divider().padding(.leading, 60) }
+                ChangeRow(patch: p)
+            }
+        }
+        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
+        .disabled(state.working || state.hasPending)
+    }
+}
+
+struct ChangeRow: View {
+    @Environment(AppState.self) private var state
+    var patch: PatchID
+
+    var body: some View {
+        let on = state.selected.contains(patch)
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: patch.symbol)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(on ? Color.white : .secondary)
+                .frame(width: 32, height: 32)
+                .background(on ? Color.accentColor : Color.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(patch.plainTitle).font(.headline)
+                Text(patch.plainBlurb).font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Toggle("", isOn: Binding(
+                get: { on },
+                set: { v in
+                    withAnimation(.snappy(duration: 0.2)) {
+                        if v { state.selected.insert(patch) } else { state.selected.remove(patch) }
+                        state.flashed = nil
+                    }
+                    state.schedulePlan()
+                }))
+                .toggleStyle(.switch)
+                .labelsHidden()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+}
+
+// MARK: - Apply, progress and result (the bar at the bottom)
+
+struct ActionBar: View {
+    @Environment(AppState.self) private var state
+    @State private var confirm = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Divider()
+            Group {
+                if state.working {
+                    progress
+                } else if state.flashed != nil && state.selectionIsInstalled {
+                    success
+                } else {
+                    idle
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 14)
+            .frame(minHeight: 64)
+            .animation(.snappy, value: state.working)
+        }
+        .background(.bar)
+        .confirmationDialog(confirmTitle, isPresented: $confirm) {
+            Button(state.selected.isEmpty ? "Restore Original Menus" : "Apply") { Task { await state.apply() } }
+        } message: {
+            Text(confirmMessage)
+        }
+    }
+
+    private var confirmTitle: String {
+        let name = state.device?.volumeName.map { "“\($0)”" } ?? "your iPod"
+        return state.selected.isEmpty ? "Put the original menus back on \(name)?" : "Change the menus on \(name)?"
+    }
+    private var confirmMessage: String {
+        "macOS asks for your Mac password. Keep the iPod connected until Clickwheel is done. Your music isn't touched."
+    }
+
+    // Idle: just the Apply button.
+    private var idle: some View {
+        HStack(spacing: 16) {
+            Spacer()
+            Button {
+                confirm = true
+            } label: {
+                Text("Apply").frame(minWidth: 90)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
             .keyboardShortcut(.defaultAction)
+            .disabled(!state.canApply)
+        }
+    }
+
+    // Working: the stages as a row, the current one with a progress bar.
+    private var progress: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                ForEach(Array(state.stages.enumerated()), id: \.element) { i, s in
+                    let cur = state.stages.firstIndex(of: state.stage ?? s) ?? 0
+                    if i > 0 { Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(.tertiary) }
+                    HStack(spacing: 5) {
+                        if i < cur {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.phosphor)
+                        } else if i == cur {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Image(systemName: "circle").foregroundStyle(.tertiary)
+                        }
+                        Text(s.rawValue)
+                            .fontWeight(i == cur ? .semibold : .regular)
+                            .foregroundStyle(i <= cur ? .primary : .secondary)
+                    }
+                }
+                Spacer()
+            }
+            .font(.callout)
+            ProgressView(value: state.progress ?? 0)
+                .opacity(state.progress == nil ? 0.3 : 1)
+            Text(state.busy == "Waiting for your Mac password" ? "Type your Mac password in the dialog." : (state.busy.map { $0 + "…" } ?? " ") + "  Keep the iPod connected.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    // Done: verified. Ejecting lets the iPod restart by itself with the new menus.
+    private var success: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "checkmark.circle.fill").font(.system(size: 30)).foregroundStyle(Theme.phosphor)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Done. Your iPod has the new menus.").font(.headline)
+                Text("Eject it to finish. It then restarts by itself.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Eject", systemImage: "eject.fill") { Task { await state.eject() } }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .keyboardShortcut(.defaultAction)
+        }
+    }
+}
+
+// MARK: - Details window (technical; for people who want to see exactly what happens)
+
+struct DetailsView: View {
+    var body: some View {
+        TabView {
+            TechnicalView().tabItem { Text("Details") }
+            ConsolePage().tabItem { Text("Log") }
+        }
+        .frame(minWidth: 640, minHeight: 520)
+    }
+}
+
+struct TechnicalView: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Card(title: "iPod", symbol: "ipod") {
+                    if let d = state.device {
+                        SpecRow(key: "model", value: d.model?.displayName ?? "not supported")
+                        SpecRow(key: "board", value: d.board ?? "— (SysInfo not readable)")
+                        SpecRow(key: "model no.", value: d.modelNumber ?? "—")
+                        SpecRow(key: "firmware", value: [d.firmwareVersion, d.buildVersion.map { "build " + $0 }].compactMap { $0 }.joined(separator: " · ").ifEmpty("—"))
+                        SpecRow(key: "partition", value: "/dev/\(d.partition) · Apple_MDFW · \(d.partitionSize >> 20) MiB")
+                        SpecRow(key: "volume", value: d.mountPoint ?? "not mounted")
+                    } else {
+                        Text("No iPod connected.").foregroundStyle(.secondary)
+                    }
+                }
+                if state.device?.model != nil { DeviceStateCard() }
+                Card(title: "Firmware on this Mac", symbol: "externaldrive") {
+                    if let c = state.check, c.ok, let u = state.current {
+                        SpecRow(key: "file", value: u.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                        SpecRow(key: "sha256", value: c.sha256 ?? "?")
+                        if let i = state.currentInfo {
+                            SpecRow(key: "from", value: (i.source == "write" ? "written and verified" : "read from the iPod") + " · " + i.date.formatted(date: .abbreviated, time: .shortened))
+                        }
+                        SpecRow(key: "changes in it", value: state.patchIDs.filter { c.patches?[$0.rawValue]?.state == "applied" }.map(\.rawValue).joined(separator: " + ").ifEmpty("none"))
+                        if let stock = c.osos?.stock {
+                            SpecRow(key: "osos vs Apple original", value: stock ? "identical" : "differs", valueColor: stock ? Theme.phosphor : .secondary)
+                        }
+                        HStack {
+                            Button("Show in Finder", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([u]) }
+                            Spacer()
+                        }
+                        .controlSize(.small)
+                    } else {
+                        Text("Nothing yet. Clickwheel reads the iPod when you press Apply or Check, and keeps its firmware here.").foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if let c = state.check, let plan = state.plan, let changes = plan.changes {
+                    Card(title: "Planned change · \(state.selectionFlags.joined(separator: " "))", symbol: "number") {
+                        PartitionMap(size: c.part_size ?? state.model?.partitionSize ?? 1, images: c.images ?? [],
+                                     marks: (plan.sectors ?? []).filter { $0 != (c.checksum_offset ?? 0) / 512 * 512 },
+                                     checksumOffset: c.checksum_offset)
+                        Text("\(changes.count) bytes · \(plan.sectors?.count ?? 0) sectors (compared with what's on the iPod)")
+                            .font(Theme.monoSmall).foregroundStyle(.secondary)
+                        if !changes.isEmpty { HexDiff(changes: changes) }
+                        Divider()
+                        SpecRow(key: "osos checksum @ \(hex(c.checksum_offset ?? 0x421C, width: 4))",
+                                value: "\(hex32(c.osos?.checksum ?? 0)) → \(hex32(plan.new_checksum ?? 0))", valueColor: Theme.phosphor)
+                        if let s = plan.result_stock {
+                            SpecRow(key: "result vs Apple stock", value: s ? "identical" : "differs", valueColor: s ? Theme.phosphor : .secondary)
+                        }
+                    }
+                }
+                Card(title: "If something goes wrong", symbol: "lifepreserver") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("**Undo:** switch everything off in the main window and press Apply. That puts Apple's original bytes back.", systemImage: "arrow.uturn.backward")
+                        Label("**An install didn't finish:** keep the iPod connected and press Apply again; Clickwheel completes it.", systemImage: "arrow.clockwise")
+                        Label("**Doesn't start:** hold Menu + Select to reset; when the Apple logo appears, hold Select + Play until “Do not disconnect” (disk mode). Connect it and press Apply (or switch everything off and press Apply).", systemImage: "power")
+                        Label("**Last resort:** restore in Finder. That reinstalls Apple's software and erases the music.", systemImage: "exclamationmark.triangle")
+                    }
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(20)
         }
     }
 }
@@ -117,252 +444,7 @@ extension String {
     func ifEmpty(_ s: String) -> String { isEmpty ? s : self }
 }
 
-// MARK: - 02 Backup
-
-struct BackupPage: View {
-    @Environment(AppState.self) private var state
-    @State private var confirm = false
-
-    var body: some View {
-        @Bindable var state = state
-        Page(step: .backup, subtitle: "Reads the firmware partition twice and compares the hashes. Never writes to the iPod.") {
-            if let model = state.model, let d = state.device {
-                if let b = state.backup {
-                    Card(title: "Backup on disk", symbol: "externaldrive") {
-                        SpecRow(key: "file", value: "firmware/" + b.url.lastPathComponent)
-                        SpecRow(key: "sha256", value: b.sha256)
-                        SpecRow(key: "integrity", value: b.verified ? "matches .sha256" : "DOES NOT MATCH .sha256",
-                                valueColor: b.verified ? Theme.phosphor : .red)
-                        SpecRow(key: "made", value: b.modified.formatted(date: .abbreviated, time: .shortened))
-                        SpecRow(key: "from iPod", value: b.originSerial.map { $0 == d.serial ? "this one (serial \($0))" : "another iPod (serial \($0))" } ?? "unknown",
-                                valueColor: state.backupMatchesDevice == false ? .red : .primary)
-                    }
-                    if state.backupMatchesDevice == false {
-                        Callout(kind: .danger, text: "This backup was made from a different iPod. Move it out of `firmware/` (don't delete it) and make a new backup of this one.")
-                    } else if state.backupMatchesDevice == nil {
-                        Toggle(isOn: $state.backupConfirmed) {
-                            Text("I'm sure this backup was made from **this** iPod")
-                        }
-                        .toggleStyle(.checkbox)
-                    }
-                    if !b.verified {
-                        Callout(kind: .danger, text: "The backup doesn't match its checksum file. Don't use it.")
-                    }
-                    if state.backupUsable { NextButton(to: .patches) }
-                } else {
-                    Card(title: "No backup yet", symbol: "externaldrive.badge.plus") {
-                        Text("Clickwheel opens a Terminal window that runs `sudo scripts/\(model.backupCommand(part: d.partition)[0].split(separator: "/").last!) \(d.partition)`. Type your Mac password there; Clickwheel never sees it and picks up the result automatically.")
-                            .fixedSize(horizontal: false, vertical: true)
-                        SpecRow(key: "reads", value: "/dev/r\(d.partition) (\(model.partitionSize.formatted()) bytes), twice")
-                        SpecRow(key: "writes", value: "firmware/\(model.backupFile) + .sha256 (on this Mac)")
-                        HStack {
-                            Spacer()
-                            Button {
-                                confirm = true
-                            } label: {
-                                Label("Back Up Firmware…", systemImage: "arrow.down.doc")
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(state.busy != nil)
-                        }
-                    }
-                    Callout(kind: .info, text: "The iPod is unmounted during the backup (it disappears from Finder). That's expected.")
-                }
-            } else {
-                Callout(kind: .info, text: "Connect a supported iPod first.")
-            }
-        }
-        .confirmationDialog("Back up the firmware?", isPresented: $confirm) {
-            Button("Back Up") { Task { await state.runBackup() } }
-        } message: {
-            Text("This only reads from the iPod. A Terminal window opens and asks for your Mac password.")
-        }
-    }
-}
-
-// MARK: - 03 Patches
-
-struct PatchesPage: View {
-    @Environment(AppState.self) private var state
-
-    var body: some View {
-        Page(step: .patches, subtitle: "Builds a patched copy on your Mac. The iPod isn't touched in this step.") {
-            if !state.backupUsable {
-                Callout(kind: .info, text: "Make (or confirm) a verified backup of this iPod first. The patches are checked against it.")
-            } else if let c = state.check {
-                DeviceStateCard(compact: true)
-                if c.patchable == false {
-                    Callout(kind: .danger, text: "**Not patchable.** At least one patch location in your firmware doesn't contain the expected bytes, so this isn't the supported build. Clickwheel won't build anything.")
-                }
-                Card(title: "Patches", symbol: "hammer") {
-                    VStack(spacing: 10) {
-                        ForEach(PatchID.allCases) { p in
-                            patchRow(p, state: c.patches?[p.rawValue]?.state ?? "?")
-                            if p != PatchID.allCases.last { Divider() }
-                        }
-                    }
-                }
-                if let plan = state.plan, let changes = plan.changes {
-                    Card(title: "Partition map", symbol: "memorychip") {
-                        PartitionMap(size: c.part_size ?? state.model?.partitionSize ?? 1, images: c.images ?? [],
-                                     marks: (plan.sectors ?? []).filter { $0 != (c.checksum_offset ?? 0) / 512 * 512 },
-                                     checksumOffset: c.checksum_offset)
-                    }
-                    Card(title: "Diff · \(changes.count) bytes · \(plan.sectors?.count ?? 0) sectors", symbol: "number") {
-                        HexDiff(changes: changes)
-                        Divider()
-                        SpecRow(key: "osos checksum @ \(hex(c.checksum_offset ?? 0x421C, width: 4))",
-                                value: "\(hex32(c.osos?.checksum ?? 0)) → \(hex32(plan.new_checksum ?? 0))", valueColor: Theme.phosphor)
-                        if let stock = c.osos?.stock {
-                            SpecRow(key: "osos vs Apple stock", value: stock ? "identical" : "differs", valueColor: stock ? Theme.phosphor : Theme.amber)
-                        }
-                    }
-                }
-                if state.selectionIsInstalled && state.built == nil {
-                    Callout(kind: .ok, text: "**This selection is already on your iPod.** Change the toggles to build something different.")
-                }
-                if let b = state.built {
-                    Callout(kind: .ok, text: "Built **\(URL(fileURLWithPath: b.output ?? "").lastPathComponent)** · sha256 `\(String((b.output_sha256 ?? "").prefix(16)))…`. Next: Flash.")
-                    NextButton(to: .flash)
-                }
-                HStack {
-                    Button("Re-check", systemImage: "arrow.clockwise") { Task { await state.runCheck() } }
-                    Spacer()
-                    Button {
-                        Task { await state.build() }
-                    } label: {
-                        Label("Build Patched Copy", systemImage: "hammer.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(state.selected.isEmpty || c.patchable != true || state.busy != nil || state.selectionIsInstalled)
-                }
-            } else {
-                BusyLabel(text: "running patch.py --check…")
-            }
-        }
-    }
-
-    private func patchRow(_ p: PatchID, state s: String) -> some View {
-        let on = Binding(get: { state.selected.contains(p) }, set: { v in
-            if v { state.selected.insert(p) } else { state.selected.remove(p) }
-            state.schedulePlan()
-        })
-        return HStack(alignment: .top, spacing: 12) {
-            Image(systemName: p.symbol).font(.title3).foregroundStyle(Color.accentColor).frame(width: 26)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text(p.title).font(.headline)
-                    Text(p.flag).font(Theme.monoTiny).foregroundStyle(.tertiary)
-                }
-                Text(p.blurb).font(.callout).foregroundStyle(.secondary)
-            }
-            Spacer()
-            if s == "mismatch" {
-                Badge(text: "unexpected bytes", color: .red).help("Your backup doesn't contain the expected bytes here")
-            } else if let d = state.deviceState?.patches[p.rawValue] {
-                Badge(text: d == "applied" ? "on iPod" : "not on iPod", color: d == "applied" ? Theme.phosphor : .secondary)
-                    .help("What the iPod runs now (\(state.deviceState?.sourceText ?? ""))")
-            }
-            Toggle("", isOn: on).toggleStyle(.switch).labelsHidden().disabled(s == "mismatch")
-        }
-    }
-}
-
-// MARK: - 04 Flash
-
-struct FlashPage: View {
-    @Environment(AppState.self) private var state
-    @State private var confirm = false
-
-    var body: some View {
-        Page(step: .flash, subtitle: "The one step that changes the iPod. Writes only what differs, then reads it back.") {
-            if let b = state.built, let model = state.model, let d = state.device {
-                Card(title: state.flashed != nil ? "Written to iPod" : "Ready to write", symbol: state.flashed != nil ? "checkmark.seal" : "bolt.horizontal") {
-                    SpecRow(key: "image", value: b.output.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "—")
-                    SpecRow(key: "patches", value: (b.applied ?? []).joined(separator: " + "))
-                    SpecRow(key: "target", value: "/dev/r\(d.partition)")
-                    SpecRow(key: "sectors", value: (b.sectors ?? []).map { hex($0) }.joined(separator: " "))
-                    SpecRow(key: "script", value: model.writeCommand(part: d.partition, image: "…")[0])
-                }
-                recovery
-                if state.flashed != nil {
-                    Callout(kind: .ok, text: "**Written and verified.** The new firmware starts after a reboot.")
-                    TestChecklist()
-                } else {
-                    HStack {
-                        Spacer()
-                        Button(role: .destructive) {
-                            confirm = true
-                        } label: {
-                            Label("Write to iPod…", systemImage: "bolt.fill")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.orange)
-                        .disabled(state.busy != nil || !state.backupUsable)
-                    }
-                }
-            } else {
-                DeviceStateCard()
-                Callout(kind: .info, text: "Build a patched copy first (step 03).")
-            }
-        }
-        .confirmationDialog("Write the patched firmware to the iPod?", isPresented: $confirm) {
-            Button("Write Firmware", role: .destructive) { Task { await state.runFlash() } }
-        } message: {
-            Text("A Terminal window opens and asks for your Mac password. Keep the iPod connected until it finishes. Your verified backup can be written back at any time from Restore.")
-        }
-    }
-
-    private var recovery: some View {
-        Card(title: "If something goes wrong", symbol: "lifepreserver") {
-            VStack(alignment: .leading, spacing: 6) {
-                Label("**Undo:** Restore ▸ Roll Back writes your original backup back.", systemImage: "arrow.uturn.backward")
-                Label("**Doesn't boot:** hold Menu + Select to reset; when the Apple logo appears, hold Select + Play until “Do not disconnect” (disk mode). Then roll back.", systemImage: "power")
-                Label("**Last resort:** restore in Finder. That reinstalls stock firmware and erases the music.", systemImage: "exclamationmark.triangle")
-            }
-            .font(.callout)
-        }
-    }
-}
-
-// MARK: - Restore
-
-struct RestorePage: View {
-    @Environment(AppState.self) private var state
-    @State private var confirm = false
-
-    var body: some View {
-        Page(step: .restore, subtitle: "Put your original firmware back.") {
-            if let b = state.backup, b.verified, let model = state.model, let d = state.device {
-                Card(title: "Roll back", symbol: "arrow.uturn.backward.circle") {
-                    SpecRow(key: "backup", value: "firmware/" + b.url.lastPathComponent)
-                    SpecRow(key: "sha256", value: b.sha256)
-                    if model != .g4 {
-                        SpecRow(key: "currently on iPod", value: state.deviceState.map { $0.isStock && !$0.patches.isEmpty ? "original firmware" : ($0.applied.isEmpty ? ($0.image.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "unknown") : $0.applied.joined(separator: " + ")) } ?? "unknown")
-                        Text("Only the sectors that differ between those two images are written; the script refuses if the iPod holds anything else.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Spacer()
-                        Button(role: .destructive) { confirm = true } label: {
-                            Label("Roll Back to Original…", systemImage: "arrow.uturn.backward")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(state.busy != nil || state.backupMatchesDevice == false)
-                    }
-                }
-                .confirmationDialog("Write the original firmware back to \(d.partition)?", isPresented: $confirm) {
-                    Button("Roll Back", role: .destructive) { Task { await state.runRollback() } }
-                }
-            } else {
-                Callout(kind: .info, text: "Rolling back needs a connected, supported iPod and its verified backup in `firmware/`.")
-            }
-            Callout(kind: .info, text: "A firmware update or restore in Finder also removes the patches (and a restore erases the music).")
-        }
-    }
-}
-
-// MARK: - Console
+// MARK: - Log
 
 struct ConsolePage: View {
     @Environment(AppState.self) private var state
@@ -370,7 +452,7 @@ struct ConsolePage: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("CONSOLE").font(.system(size: 11, weight: .semibold, design: .monospaced)).tracking(1.2).foregroundStyle(.secondary)
+                Text("\(state.log.count) lines · also in ~/Library/Logs/Clickwheel.log").font(Theme.monoSmall).foregroundStyle(.secondary)
                 Spacer()
                 Button("Copy", systemImage: "doc.on.doc") {
                     let text = state.log.map { "[\($0.time.formatted(date: .omitted, time: .standard))] \($0.kind == .cmd ? "$ " : "")\($0.text)" }.joined(separator: "\n")
@@ -379,6 +461,7 @@ struct ConsolePage: View {
                 }
                 Button("Clear", systemImage: "trash") { state.log.removeAll() }
             }
+            .controlSize(.small)
             .padding(10)
             Divider()
             ScrollViewReader { proxy in

@@ -15,6 +15,15 @@ The patches, available on all models, are:
 3. `--producers`: the English menu label **Composers** becomes **Producers** (for people who
    store the producer in the Composer tag).
 
+4. `--logo` (**iPod photo / color only**, **tested on a device**): turns the boot Apple logo upside down. The 78×100 RGB565
+   logo sits in the encrypted `aupd` image; the patch XORs a fixed delta
+   (`scripts/patchdata/photo_logo.xor`, from an iPodWizard flip that worked on the device) and only
+   applies when the region's sha256 is exactly stock or exactly flipped. A build that changes aupd also
+   sets the aupd "flashed" flag (`0x4230`) to 0, so the iPod copies aupd into its boot ROM at the next
+   start; `--reflash` does only that. The build reproduces the
+   iPodWizard dump byte for byte. The 4G has no such patch: flipping its grey 84×100 picture did not
+   change its boot logo (tested). The 5G logo is not done yet; see `docs/REVERSE_ENGINEERING.md`.
+
 The user typically just cloned the repo and says something like "patch my iPod". Walk them
 through the workflow below, one stage at a time. The user may not be technical. Explain each
 step in plain words, say what it touches, and wait for an explicit "yes" before any step that
@@ -91,6 +100,10 @@ This writes `firmware/ipod_fw_patched.bin` (+ `.sha256`) and prints every change
 that the changed bytes are exactly the planned ones and that the checksum line is printed.
 If the output file exists, ask before choosing a new name with `-o`. Never delete the old one
 without asking.
+If the backup already has patches (`--check` says `applied`, e.g. it was made from a patched
+iPod), add `--exact`: unnamed patches are then removed (original bytes restored), and `--exact`
+alone builds the firmware without any patches. Tell the user that a rollback of such a backup
+restores the patches, not stock firmware.
 
 ### 6. Write (user runs it, after confirming)
 Explain that this is the step that changes the iPod, then ask the user to run:
@@ -137,15 +150,21 @@ Same workflow and the same rules. The 4G scripts refuse an iPod photo (same 32 M
 - Check / build: `python3 scripts/patch.py --photo --check` (it also says whether the `osos` image is
   identical to Apple's stock 1.2.1 image), then
   `python3 scripts/patch.py --photo --labels --composers [--producers]` → `firmware/ipodphoto_fw_patched.bin`.
-- Write: `! sudo scripts/write_fw_photo.sh diskNs2` (only the differing 512-byte sectors).
+- Write: `! sudo scripts/write_fw_photo.sh diskNs2` (only the differing 512-byte sectors, in osos and,
+  for `--logo`, aupd).
 - Undo: `! sudo scripts/rollback_fw_photo.sh diskNs2`.
 - Reboot and test as for the 4G.
 
 ### The Clickwheel app (GUI)
 `app/` holds a native macOS app (SwiftUI) that runs the same scripts: `app/build_app.sh`, then
-`open app/build/Clickwheel.app`. It only does read-only work by itself; backup, write and rollback
-open a Terminal window running the `sudo scripts/…` command (after a confirmation dialog), where the
-user types their password. (Starting the scripts through `osascript … with administrator privileges`
+`open app/build/Clickwheel.app`. It needs no Terminal and makes no safety copy in `firmware/`: Apply
+asks for the password once (macOS's own dialog via `/usr/libexec/authopen`, see
+`app/Sources/Clickwheel/AuthOpen.swift`), then `scripts/write_fd.py prepare` checks and unmounts,
+`scripts/backup_fd.py dump` reads the iPod into `~/Library/Application Support/Clickwheel/<serial>/ipod.bin`,
+`patch.py --exact` builds the selection from it, and `scripts/write_fd.py write` writes only the
+differing sectors (handle on stdin) and reads them back. Undo = all switches off + Apply. An
+interrupted write leaves `pending.bin`, which the next Apply finishes. The user types the password in
+that dialog; you never do. (Starting the scripts through `osascript … with administrator privileges`
 fails: macOS blocks raw disk access for them with "Operation not permitted".)
 If the user prefers the app, explain that, and don't run it to change anything for them.
 
@@ -161,6 +180,8 @@ If the user prefers the app, explain that, and don't run it to change anything f
 | `scripts/rollback_fw.sh` | sudo: writes the original backup back |
 | `scripts/backup_fw_5g.sh`, `write_fw_5g.sh`, `rollback_fw_5g.sh` | sudo, iPod Video 5G (`--5g`): backup; write/undo only the differing sectors (leaves the hibernation image alone) via `write_sectors.py` |
 | `scripts/backup_fw_photo.sh`, `write_fw_photo.sh`, `rollback_fw_photo.sh` | sudo, iPod photo (`--photo`): same approach as the 5G scripts |
+| `scripts/backup_fd.py` | App, read-only, device handle on stdin (via `authopen`): `dump` reads the iPod twice into a file in `~/Library/Application Support/Clickwheel` (refuses `firmware/`); also `prepare`/`read` (a `firmware/` backup) and `state` |
+| `scripts/write_fd.py` | App, read-write handle on stdin (via `authopen`): `prepare` checks and unmounts; `write TO FROM` writes only the differing sectors inside osos (all models, via `write_sectors.apply`) and reads back |
 | `scripts/device_state.sh` | sudo, read-only: reads the firmware partition to a temp file and runs `patch.py --check` on it (which patches are on the iPod now); never writes |
 | `scripts/ipod_model.sh` | Read-only: `4g`, `5g`, `photo` or `unknown` for a partition (SysInfo, else size); the sudo scripts refuse a mismatch |
 | `scripts/same_model.py` | Read-only: refuses a full-partition write (4G) when the device holds a different model's firmware |

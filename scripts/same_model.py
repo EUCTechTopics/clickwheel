@@ -5,20 +5,27 @@ Usage: same_model.py /dev/rdiskNsM IMAGE.bin      (exit 0 = same model)
 """
 import struct, sys
 
-def osos_len(path):
-    with open(path, 'rb') as f:
-        head = f.read(0x4400)
+def osos_len_head(head):
+    """osos length from the first 0x4400 bytes of a partition or image, or None."""
     if len(head) < 0x4400 or head[0x100:0x104] != b']ih[' or head[0x4204:0x4208] != b'soso':
         return None
     return struct.unpack_from('<I', head, 0x4210)[0]
 
-if len(sys.argv) != 3:
-    sys.exit(__doc__)
-dev, img = osos_len(sys.argv[1]), osos_len(sys.argv[2])
-if img is None:
-    sys.exit(f'ABORT: {sys.argv[2]} has no iPod firmware directory')
-if dev is None:
-    sys.exit(f'ABORT: {sys.argv[1]} holds no readable iPod firmware directory; refusing to write blind')
-if dev != img:
-    sys.exit(f'ABORT: the iPod holds a different firmware (osos 0x{dev:x} bytes) than the image (0x{img:x}); wrong model?')
-print(f'same model: osos 0x{img:x} bytes on both')
+def osos_len(path):
+    with open(path, 'rb') as f:
+        return osos_len_head(f.read(0x4400))
+
+def main():
+    if len(sys.argv) != 3:
+        sys.exit(__doc__)
+    dev, img = osos_len(sys.argv[1]), osos_len(sys.argv[2])
+    if img is None:
+        sys.exit(f'ABORT: {sys.argv[2]} has no iPod firmware directory')
+    if dev is None:
+        sys.exit(f'ABORT: {sys.argv[1]} holds no readable iPod firmware directory; refusing to write blind')
+    if dev != img:
+        sys.exit(f'ABORT: the iPod holds a different firmware (osos 0x{dev:x} bytes) than the image (0x{img:x}); wrong model?')
+    print(f'same model: osos 0x{img:x} bytes on both')
+
+if __name__ == '__main__':
+    main()

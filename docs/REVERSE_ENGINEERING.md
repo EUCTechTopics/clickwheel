@@ -191,3 +191,44 @@ opener → descriptor → picked handler (same as the 4G's #236 → #238 → #23
 String offsets (partition): "Genres" `0x27176C`, `0x271D88`, `0x2735E2`, `0x2737C4`, `0x273DA0`;
 "Composers" `0x271774`, `0x271D6C`, `0x2735D2`, `0x2737B8`, `0x273DD4`. A full build changes 7
 sectors (`0x4200` for the checksum, the rest inside `osos`).
+
+## Pictures in the firmware
+
+Pictures are stored uncompressed inside `osos`, each with a small header followed by the pixels.
+
+- **iPod 4G and iPod photo** (20-byte header): `u32 height`, `u32 width`, `u16 row bytes`
+  (`(width*bpp+31)/32*4`), `u16 bits per pixel`, `u32 0`, `u32 data length` (= height × row bytes).
+  1- and 2-bit pictures put the leftmost pixel in the highest bits; value 3 is black. The photo's
+  pictures are mostly 16-bit RGB565, little-endian. The 4G firmware 3.1.1 has 94 pictures, the photo
+  1.2.1 has 171.
+- **iPod Video** (28-byte header): `u32 format` (`0x565` RGB565, `0x1444` ARGB4444, `0x4`, `0x2`),
+  `u16 row bytes`, `u16 bits per pixel`, `u32 0`, `u32 0`, `u32 height`, `u32 width`, `u32 data length`.
+  403 pictures. The `rsrc` image is a FAT16 volume (`IPODRESOURC`) with only fonts and VideoCore
+  files.
+- **Apple logos found:** 4G: grey 84×100 2-bit at osos `0x1A88C0` (partition `0x1ACEC0`; stock pixels have
+  the leaf in the first rows). **Tested on a device: flipping it does not change the boot logo**, so the
+  4G boot logo isn't this picture), plus black 44×52, 36×36 and 30×36 ones. Photo and Video: only a small blue "aqua" apple
+  (51×62). Neither has a large boot-logo picture anywhere in the firmware partition, so their boot
+  logo is probably drawn by the bootloader in flash.
+- Flipping a picture upside down = reversing its rows: same size and same osos checksum (the bytes
+  are only rearranged).
+- **iPod photo boot logo (`--logo`)**: iPodWizard lists it as picture index 179, ID 9, 78×100, 16-bit,
+  type 2. It is **not** in `osos`: it sits in the `aupd` image (the flash/bootloader updater,
+  partition `0x527E00`, `0x10EED4` bytes), which is encrypted (8.0 bits/byte, incompressible).
+  Comparing a dump before and after an iPodWizard flip changed only bytes `0x5DDB22`–`0x5E1778`
+  (10,560 bytes, 31 sectors), nothing else, not even the aupd checksum field (`0x0BC4E5D1`, which is
+  not a plain byte sum of the stored data). The XOR of the two versions is row-symmetric for 156-byte
+  rows (78 × 2) and 100 rows starting at `0x5DDAB4` (a few bytes earlier also fit, because the edges are
+  equal), so the encryption is a position-based XOR stream: flipping = XOR with the fixed delta
+  `scripts/patchdata/photo_logo.xor`. The checksum presumably covers the decrypted bytes, whose sum a
+  row flip does not change. `patch.py` accepts the region only when its sha256 is exactly the stock or
+  the flipped version. `write_fd.py` lets a write reach into `aupd` only when a sector there differs
+  and refuses any other area.
+- **The aupd "flashed" flag**: writing a changed `aupd` alone does nothing (tested: the partition was
+  byte-identical to the iPodWizard dump and the logo stayed upright). The aupd directory entry's u32 at
+  +8 (partition `0x4230` on the photo) is 0 in every Apple updater file (`Firmware-5.4.2.1`,
+  `Firmware-10.3.1.1`, `Firmware-20.6.3`) and 1 on every iPod dump: the iPod flashes `aupd` into its
+  boot ROM when it finds 0, then sets 1. `patch.py` resets it whenever a build changes `aupd`, and
+  `--reflash` resets it on its own. Tested on a device: with the flag at 0 the iPod flashed
+  aupd at the next start and showed the flipped logo.
+- **iPod Video**: not done yet. The same method should work: dump, flip in iPodWizard, dump again, compare.

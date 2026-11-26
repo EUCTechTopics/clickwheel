@@ -7,21 +7,38 @@ struct ClickwheelApp: App {
 
     var body: some Scene {
         Window("Clickwheel", id: "main") {
-            ContentView()
+            MainView()
                 .environment(state)
-                .frame(minWidth: 1060, minHeight: 680)
+                .frame(minWidth: 860, minHeight: 600)
                 .task { await Snapshotter.runIfRequested(state) }
         }
         .windowToolbarStyle(.unified)
+        .defaultSize(width: 940, height: 680)
         .commands {
             CommandGroup(after: .appInfo) {
                 Button("Choose Repository…") { state.chooseRepo() }
             }
             CommandGroup(after: .toolbar) {
-                Button("Rescan for iPods") { Task { await state.scan(quiet: false) } }
+                Button("Look for iPods Again") { Task { await state.scan(quiet: false) } }
                     .keyboardShortcut("r")
             }
+            CommandGroup(after: .windowList) {
+                OpenDetailsButton()
+            }
         }
+        Window("Clickwheel Details", id: "details") {
+            DetailsView()
+                .environment(state)
+        }
+        .defaultSize(width: 720, height: 680)
+    }
+}
+
+private struct OpenDetailsButton: View {
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        Button("Details & Log") { openWindow(id: "details") }
+            .keyboardShortcut("i")
     }
 }
 
@@ -35,129 +52,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
-}
-
-struct ContentView: View {
-    @Environment(AppState.self) private var state
-    @State private var inspector = true
-
-    var body: some View {
-        @Bindable var state = state
-        NavigationSplitView {
-            Sidebar()
-                .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 280)
-        } detail: {
-            Group {
-                switch state.step {
-                case .device: DevicePage()
-                case .backup: BackupPage()
-                case .patches: PatchesPage()
-                case .flash: FlashPage()
-                case .restore: RestorePage()
-                case .console: ConsolePage()
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
-        .inspector(isPresented: $inspector) {
-            PreviewPanel()
-                .inspectorColumnWidth(min: 250, ideal: 270, max: 320)
-        }
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                // Only fixed items here: adding or removing a toolbar item (e.g. a busy label)
-                // resizes the window's columns and makes the page re-wrap. Busy state is in the sidebar.
-                Button("Rescan", systemImage: "arrow.triangle.2.circlepath") { Task { await state.scan(quiet: false) } }
-                    .help("Look for connected iPods again")
-                Button("Preview", systemImage: "sidebar.trailing") { inspector.toggle() }
-                    .help("Show or hide the iPod preview")
-            }
-        }
-        .navigationTitle("Clickwheel")
-        .navigationSubtitle(state.device.map { "\($0.model?.displayName ?? "unknown iPod") · /dev/\($0.partition)" } ?? "no iPod connected")
-        .sheet(item: $state.terminal) { s in
-            TerminalPanel(session: s).environment(state)
-                .interactiveDismissDisabled()
-        }
-        .alert(item: $state.alert) { a in
-            if a.fullDiskAccess {
-                Alert(title: Text(a.title), message: Text(a.message),
-                      primaryButton: .default(Text("Open Full Disk Access Settings")) { AppState.openFullDiskAccessSettings() },
-                      secondaryButton: .cancel(Text("Later")))
-            } else {
-                Alert(title: Text(a.title), message: Text(a.message), dismissButton: .default(Text("OK")))
-            }
-        }
-    }
-}
-
-struct Sidebar: View {
-    @Environment(AppState.self) private var state
-
-    var body: some View {
-        @Bindable var state = state
-        VStack(spacing: 0) {
-            List(selection: $state.step) {
-                Section("Workflow") {
-                    ForEach([Step.device, .backup, .patches, .flash]) { row($0) }
-                }
-                Section("Tools") {
-                    ForEach([Step.restore, .console]) { row($0) }
-                }
-            }
-            .listStyle(.sidebar)
-            footer
-        }
-    }
-
-    private func row(_ s: Step) -> some View {
-        let st = state.status(s)
-        return HStack(spacing: 10) {
-            Text(s.number)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.tertiary)
-                .frame(width: 20, alignment: .leading)
-            Label(s.title, systemImage: s.symbol)
-            Spacer()
-            LED(color: st.color, pulsing: st == .ready && state.busy != nil)
-                .help(st.label)
-        }
-        .tag(s)
-    }
-
-    /// A tiny "system monitor" in the sidebar footer.
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Divider().padding(.bottom, 6)
-            HStack(spacing: 6) {
-                LED(color: state.device == nil ? .secondary.opacity(0.4) : (state.model == nil ? .red : Theme.phosphor),
-                    pulsing: state.device == nil)
-                Text(state.device == nil ? "NO DEVICE" : (state.device?.board ?? "iPod").uppercased())
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-            }
-            if let b = state.busy {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.mini)
-                    Text(b.uppercased() + "…").lineLimit(1).truncationMode(.tail)
-                }
-                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Color.accentColor)
-                .transition(.opacity)
-            }
-            Group {
-                Text("dev  " + (state.device.map { "/dev/" + $0.partition } ?? "—"))
-                Text("fw   " + (state.device?.firmwareVersion ?? "—"))
-                Text("osos " + (state.check?.osos.map { hex($0.length) } ?? "—"))
-                Text("sum  " + (state.check?.osos.map { hex32($0.checksum) } ?? "—"))
-                Text("on   " + (state.deviceState.flatMap { $0.patches.isEmpty ? nil : ($0.applied.isEmpty ? "stock" : $0.applied.map { String($0.prefix(3)) }.joined(separator: "+")) } ?? "?"))
-                    .foregroundStyle(state.deviceState?.applied.isEmpty == false ? Theme.phosphor : Color.secondary)
-            }
-            .font(Theme.monoTiny)
-            .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 14)
-        .padding(.bottom, 12)
-    }
 }
 
 /// Developer aid: `CLICKWHEEL_SNAPSHOT=/some/dir open Clickwheel.app` renders every page of the
@@ -188,28 +82,28 @@ enum Snapshotter {
             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(name).png"))
         }
         if ProcessInfo.processInfo.environment["CLICKWHEEL_DEMO"] != nil {
-            state.setDeviceState(.init(patches: ["labels": "applied", "composers": "applied", "producers": "original"],
-                                       image: nil, source: .read, date: Date()))
+            state.demoPatches = ["labels": "applied", "composers": "applied", "producers": "applied"]
+            state.selected = [.labels, .composers, .producers]
             try? await Task.sleep(for: .seconds(1))
         }
-        for step in Step.allCases {
-            state.step = step
-            try? await Task.sleep(for: .seconds(1.2))
-            shot(step.rawValue)
-        }
-        // extra states (demo mode only): after a write, and the Terminal hand-off panel
-        if ProcessInfo.processInfo.environment["CLICKWHEEL_DEMO"] != nil {
-            state.built = state.plan
-            state.flashed = URL(fileURLWithPath: "/tmp/demo.bin")
-            state.step = .flash
-            try? await Task.sleep(for: .seconds(1.2))
-            shot("flash_done")
-            var t = AppState.TerminalSession(title: "Backing up firmware", command: "sudo scripts/backup_fw_photo.sh disk4s2")
-            t.output = "Unmount of all volumes on disk4 was successful\nReading /dev/rdisk4s2 -> firmware/ipodphoto_fw_backup.bin\n32+0 records in\n32+0 records out\n33554432 bytes transferred in 9.8 secs"
-            state.terminal = t
-            try? await Task.sleep(for: .seconds(1.5))
-            shot("terminal", sheet: true)
-        }
+        shot("main")
+        guard ProcessInfo.processInfo.environment["CLICKWHEEL_DEMO"] != nil else { NSApp.terminate(nil); return }
+        state.selected = [.labels, .composers]
+        state.schedulePlan()
+        try? await Task.sleep(for: .seconds(1.5))
+        shot("changed")
+        state.stages = [.prepare, .install, .verify]
+        state.stage = .install
+        state.progress = 0.62
+        state.busy = "Writing to your iPod"
+        try? await Task.sleep(for: .seconds(0.8))
+        shot("working")
+        state.stages = []; state.stage = nil; state.progress = nil; state.busy = nil
+        state.demoPatches = ["labels": "applied", "composers": "applied", "producers": "original"]
+        state.flashed = URL(fileURLWithPath: "/tmp/demo.bin")
+        try? await Task.sleep(for: .seconds(1.2))
+        shot("done")
+        state.flashed = nil
         NSApp.terminate(nil)
     }
 }

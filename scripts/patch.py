@@ -14,6 +14,8 @@ Usage:
   python3 scripts/patch.py --photo --check              # inspect firmware/ipodphoto_fw_backup.bin
   python3 scripts/patch.py --labels -i IN.bin -o OUT.bin
   python3 scripts/patch.py --photo --labels --plan --json  # what would change, as JSON; writes nothing
+  python3 scripts/patch.py --photo --exact --labels     # labels on, every other patch removed
+  python3 scripts/patch.py --photo --exact              # remove all patches (back to the original bytes)
 
   python3 scripts/patch.py --find "Composers"           # read-only string search (for new renames)
 
@@ -21,6 +23,11 @@ Patches:
   --labels     rename the English "Genres" menu labels to "Labels" (5 strings)
   --composers  after picking a genre/label, show Composers instead of Artists (1 byte)
   --producers  rename the English "Composers" menu labels to "Producers" (5 strings)
+  --logo       iPod photo only: the boot Apple logo upside down (15,600 bytes in the aupd image)
+
+--exact: build exactly the selection. Patches that are named are applied; patches that are not named
+are put back to their original bytes (removed) if the input has them. Without --exact a build only
+adds patches and leaves the others as they are in the input.
 
 Safety: the input must be a full firmware partition of the selected model whose osos image has the
 exact expected size and a valid checksum, and every patched location must contain exactly the
@@ -89,6 +96,10 @@ MODELS = {
         # informational: the checks below are what decide.
         'stock_osos_sha256': '9321189b846a7317f4f575075696056e9a18c79644886a00055a402259c6fadc',
         'input': 'ipodphoto_fw_backup.bin',
+        # aupd directory entry, u32 at +8: Apple's updater files ship 0; the iPod sets it to 1 once it has
+        # flashed aupd into the boot ROM. A changed aupd only reaches the boot ROM (the boot logo) when
+        # this is 0 again, so a build that changes aupd (or --reflash) resets it.
+        'aupd_flashed': 0x4230,
         'output': 'ipodphoto_fw_patched.bin',
         'patches': {
             'labels': {
@@ -108,11 +119,42 @@ MODELS = {
                 'edits': [(o, b'Composers', b'Producers') for o in (0x271774, 0x271D6C, 0x2735D2, 0x2737B8, 0x273DD4)],
                 'context': [],
             },
+            'logo': {
+                # The 78x100 RGB565 boot logo lives in the encrypted aupd image (flashed into the boot ROM),
+                # not in osos. The encryption is a position-based XOR stream, so flipping the picture upside
+                # down = XOR with a fixed delta (stock ^ flipped ciphertext, taken from an iPodWizard flip that
+                # was tested on a device). Row reversal keeps the decrypted byte sum, so the aupd checksum
+                # field stays valid; iPodWizard leaves it unchanged too.
+                'desc': 'Boot Apple logo (78x100, in aupd) upside down',
+                'xor': {'image': 'aupd', 'offset': 0x5DDAB4, 'length': 15600, 'delta': 'photo_logo.xor',
+                        'delta_sha256': '028f5e2955fed46e94621f7747183e64c57c7011b06e43ba46a11519366c761d',
+                        'original_sha256': '8bdcf822435e134db63cb4cee80ceb0f83d08ffe393bd3c9c58f47e9e02eceec',
+                        'applied_sha256': 'df328b32b5689ec01b8782a5e2706b99612c100f132e294c5c61a6031b4c93a5'},
+                'context': [],
+            },
         },
     },
 }
 
 JSON = False
+
+
+def xor_edits(buf, p):
+    """Edits for an 'xor' patch, worked out from the input: the region must be exactly the original
+    bytes or exactly the patched bytes (by sha256). None when neither: the patch then reports 'mismatch'."""
+    x = p['xor']
+    delta = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'patchdata', x['delta']), 'rb').read()
+    if len(delta) != x['length'] or hashlib.sha256(delta).hexdigest() != x['delta_sha256']:
+        fail(f'scripts/patchdata/{x["delta"]} is missing or damaged')
+    o, n = x['offset'], x['length']
+    cur = bytes(buf[o:o + n])
+    other = bytes(c ^ d for c, d in zip(cur, delta))
+    h = hashlib.sha256(cur).hexdigest()
+    if h == x['original_sha256']:
+        return [(o, cur, other)]
+    if h == x['applied_sha256']:
+        return [(o, other, cur)]
+    return None
 
 def fail(msg):
     if JSON:
@@ -160,6 +202,8 @@ def images(buf):
 
 def state(buf, p):
     """'original', 'applied' or 'mismatch' for one patch."""
+    if p['edits'] is None:
+        return 'mismatch'
     for a, pre, b, post in p['context']:
         if buf[a:a + len(pre)] != pre or buf[b:b + len(post)] != post:
             return 'mismatch'
@@ -199,6 +243,11 @@ def main():
     ap.add_argument('--labels', action='store_true', help='English "Genres" -> "Labels"')
     ap.add_argument('--composers', action='store_true', help='Genre/Label list opens Composers instead of Artists')
     ap.add_argument('--producers', action='store_true', help='English "Composers" -> "Producers"')
+    ap.add_argument('--logo', action='store_true', help='iPod photo only: boot Apple logo upside down')
+    ap.add_argument('--reflash', action='store_true',
+                    help='iPod photo only: mark aupd as not yet flashed, so the iPod copies it into its boot ROM at the next start')
+    ap.add_argument('--exact', action='store_true',
+                    help='unnamed patches are removed (original bytes restored); with no patch named: remove all')
     ap.add_argument('--check', action='store_true', help='only inspect the input and report')
     ap.add_argument('--plan', action='store_true', help='show exactly what would change, but write nothing')
     ap.add_argument('--json', action='store_true', help='machine-readable output (for the Clickwheel app)')
@@ -218,6 +267,10 @@ def main():
         fail(f'{a.input} not found (make the backup first)')
     orig = open(a.input, 'rb').read()
     start, length, chk = osos_info(orig, m)
+    patches = {n: dict(p, edits=xor_edits(orig, p)) if 'xor' in p else p for n, p in patches.items()}
+    for n in ('labels', 'composers', 'producers', 'logo'):
+        if getattr(a, n) and n not in patches:
+            fail(f'--{n} is not available for {m["name"]}')
     if a.find:
         find(orig, start, length, a.find)
         return
@@ -230,6 +283,9 @@ def main():
     say(f'osos  : 0x{length:x} bytes, checksum 0x{chk:08x} (valid)')
     if osos_stock is not None:
         say(f'osos  : {"identical to" if osos_stock else "differs from"} Apple\'s stock image for this build')
+    flag = m.get('aupd_flashed')
+    if flag:
+        say(f'aupd  : {"in the boot ROM (flag 1)" if orig[flag] == 1 else "waiting to be flashed at the next start (flag 0)"}')
     states = {n: state(orig, p) for n, p in patches.items()}
     for n, s in states.items():
         say(f'patch {n:10s}: {s}')
@@ -237,7 +293,7 @@ def main():
               'osos': {'offset': start, 'length': length, 'checksum': chk, 'stock': osos_stock},
               'checksum_offset': CHK_OFF, 'part_size': len(orig), 'images': images(orig),
               'patches': {n: {'state': states[n], 'desc': p['desc'],
-                              'edits': [{'offset': o, 'old': old.hex(), 'new': new.hex()} for o, old, new in p['edits']]}
+                              'edits': [{'offset': o, 'old': old.hex(), 'new': new.hex()} for o, old, new in (p['edits'] or [])]}
                           for n, p in patches.items()}}
     bad = [n for n, s in states.items() if s == 'mismatch']
     if a.check:
@@ -251,9 +307,10 @@ def main():
         return
 
     wanted = [n for n in patches if getattr(a, n)]
-    if not wanted:
-        fail('choose at least one patch: --labels, --composers, --producers (or --check / --find)')
-    for n in wanted:
+    removed = [n for n in patches if a.exact and n not in wanted and states[n] != 'original']
+    if not wanted and not a.exact and not a.reflash:
+        fail('choose at least one patch: --labels, --composers, --producers (or --exact, --check / --find)')
+    for n in wanted + removed:
         if states[n] == 'mismatch':
             fail(f'patch "{n}": the firmware does not contain the expected bytes')
     if not a.plan and os.path.exists(a.output):
@@ -261,12 +318,41 @@ def main():
 
     buf = bytearray(orig)
     allowed = set(range(CHK_OFF, CHK_OFF + 4))
+    imgs = {i['type']: i for i in images(orig)}
+
+    def inside(n, o, size):
+        # every edit stays in osos, or in the one other image an 'xor' patch names (e.g. aupd)
+        regions = [(start, start + length)]
+        name = patches[n].get('xor', {}).get('image')
+        if name:
+            if name not in imgs:
+                fail(f'patch "{n}": no {name} image in this firmware')
+            regions.append((imgs[name]['offset'], imgs[name]['offset'] + imgs[name]['length']))
+        if not any(a <= o and o + size <= b for a, b in regions):
+            fail(f'0x{o:x} is outside the images patch "{n}" may change')
+
     for n in wanted:
         for o, old, new in patches[n]['edits']:
-            if not (start <= o and o + len(new) <= start + length):
-                fail(f'0x{o:x} is outside the osos image')
+            inside(n, o, len(new))
             buf[o:o + len(new)] = new
             allowed |= set(range(o, o + len(new)))
+    for n in removed:
+        for o, old, new in patches[n]['edits']:
+            inside(n, o, len(old))
+            buf[o:o + len(old)] = old
+            allowed |= set(range(o, o + len(old)))
+    # A changed aupd only takes effect after the iPod flashes it into its boot ROM: reset its flag.
+    flag = m.get('aupd_flashed')
+    aupd_img = imgs.get('aupd')
+    aupd_changed = bool(aupd_img) and buf[aupd_img['offset']:aupd_img['offset'] + aupd_img['length']] != \
+        orig[aupd_img['offset']:aupd_img['offset'] + aupd_img['length']]
+    if a.reflash and not flag:
+        fail(f'--reflash is not available for {m["name"]}')
+    if flag and (aupd_changed or a.reflash):
+        if orig[flag:flag + 4] not in (b'\0\0\0\0', b'\1\0\0\0'):
+            fail(f'unexpected aupd flag 0x{orig[flag:flag + 4].hex()} at 0x{flag:x}')
+        buf[flag:flag + 4] = b'\0\0\0\0'
+        allowed |= set(range(flag, flag + 4))
     new_chk = sum(buf[start:start + length]) & 0xFFFFFFFF
     struct.pack_into('<I', buf, CHK_OFF, new_chk)
 
@@ -276,9 +362,16 @@ def main():
         fail('verification failed: unexpected bytes changed')
     if osos_info(bytes(buf), m)[2] != new_chk:
         fail('verification failed: checksum')
+    result = {n: state(bytes(buf), dict(p, edits=xor_edits(buf, p)) if 'xor' in p else p) for n, p in patches.items()}
+    expect = {n: 'applied' if n in wanted else 'original' if n in removed else states[n] for n in patches}
+    if result != expect:
+        fail(f'verification failed: patch states after the build are {result}, expected {expect}')
+    result_stock = (hashlib.sha256(buf[start:start + length]).hexdigest() == stock) if stock else None
 
     sha = hashlib.sha256(buf).hexdigest()
-    report.update({'applied': wanted, 'new_checksum': new_chk, 'plan': a.plan, 'output': None if a.plan else a.output,
+    report.update({'aupd_reflash': bool(flag) and buf[flag:flag + 4] == b'\0\0\0\0' and orig[flag:flag + 4] != b'\0\0\0\0',
+                   'applied': wanted, 'removed': removed, 'exact': a.exact, 'result_states': result,
+                   'result_stock': result_stock, 'new_checksum': new_chk, 'plan': a.plan, 'output': None if a.plan else a.output,
                    'output_sha256': sha, 'sectors': sorted({i // 512 * 512 for i in diff}),
                    'changes': [{'offset': i, 'old': orig[i], 'new': buf[i]} for i in diff]})
     if not a.plan:
@@ -290,11 +383,16 @@ def main():
     if JSON:
         print(json.dumps(report))
         return
-    print(f'\n{"plan (nothing written)" if a.plan else "applied"}: {", ".join(wanted)}')
+    print(f'\n{"plan (nothing written)" if a.plan else "built"}: applied {", ".join(wanted) or "nothing"}'
+          + (f'; removed {", ".join(removed)}' if removed else ''))
+    if result_stock is not None:
+        print(f'osos  : result is {"identical to" if result_stock else "different from"} Apple\'s stock image for this build')
     print(f'osos checksum 0x{chk:08x} -> 0x{new_chk:08x} (at 0x{CHK_OFF:x})')
     print(f'{len(diff)} bytes changed:')
-    for i in diff:
+    for i in diff[:64]:
         print(f'  0x{i:06x}: {orig[i]:02x} -> {buf[i]:02x}')
+    if len(diff) > 64:
+        print(f'  ... and {len(diff) - 64} more (between 0x{diff[64]:06x} and 0x{diff[-1]:06x}; --json lists them all)')
     if not a.plan:
         print(f'wrote {a.output}\nsha256 {sha}')
 

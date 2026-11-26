@@ -50,41 +50,19 @@ enum IPodModel: String, CaseIterable, Identifiable, Codable {
     var colorScreen: Bool { self != .g4 }
     /// Tested on a real device by the project.
     var deviceTested: Bool { true }
-
-    /// Shell command lines (relative to the repo root) for the privileged steps.
-    func backupCommand(part: String) -> [String] {
-        switch self {
-        case .g4: return ["scripts/backup_fw.sh", part]
-        case .photo: return ["scripts/backup_fw_photo.sh", part]
-        case .g5: return ["scripts/backup_fw_5g.sh", part]
-        }
-    }
-    /// `from` is the image currently on the iPod (sector-diff writers only; the 4G writes everything).
-    func writeCommand(part: String, image: String, from: String? = nil) -> [String] {
-        switch self {
-        case .g4: return ["scripts/write_fw.sh", image, part]
-        case .photo: return ["scripts/write_fw_photo.sh", part, image] + (from.map { [$0] } ?? [])
-        case .g5: return ["scripts/write_fw_5g.sh", part, image] + (from.map { [$0] } ?? [])
-        }
-    }
-    func stateCommand(part: String) -> [String] { ["scripts/device_state.sh", rawValue, part, "--json"] }
-    func rollbackCommand(part: String, image: String) -> [String] {
-        switch self {
-        case .g4: return ["scripts/rollback_fw.sh", part]
-        case .photo: return ["scripts/rollback_fw_photo.sh", part, image]
-        case .g5: return ["scripts/rollback_fw_5g.sh", part, image]
-        }
-    }
 }
 
 enum PatchID: String, CaseIterable, Identifiable {
-    case labels, composers, producers
+    case labels, composers, producers, logo
     var id: String { rawValue }
+    /// Offered for this model? The boot-logo flip exists only for the iPod photo / color so far.
+    func available(on model: IPodModel?) -> Bool { self != .logo || model == .photo }
     var title: String {
         switch self {
         case .labels: return "Genres → Labels"
         case .composers: return "Label → Composers"
         case .producers: return "Composers → Producers"
+        case .logo: return "Apple logo upside down"
         }
     }
     var flag: String { "--\(rawValue)" }
@@ -93,6 +71,32 @@ enum PatchID: String, CaseIterable, Identifiable {
         case .labels: return "tag"
         case .composers: return "arrow.triangle.branch"
         case .producers: return "slider.horizontal.3"
+        case .logo: return "apple.logo"
+        }
+    }
+    /// Plain-language wording for the main window.
+    var plainTitle: String {
+        switch self {
+        case .labels: return "Rename Genres to Labels"
+        case .composers: return "Open a label to see its composers"
+        case .producers: return "Rename Composers to Producers"
+        case .logo: return "Flip the Apple logo upside down"
+        }
+    }
+    var plainBlurb: String {
+        switch self {
+        case .labels: return "For collections sorted by record label. The Genres menu is called Labels."
+        case .composers: return "Picking a label (or genre) lists its composers, then albums, then songs. Normally it lists artists."
+        case .producers: return "For people who keep the producer in the Composer field. The Composers menu is called Producers."
+        case .logo: return "The Apple logo shown while the iPod starts up is upside down."
+        }
+    }
+    var shortName: String {
+        switch self {
+        case .labels: return "Labels"
+        case .composers: return "Composers per label"
+        case .producers: return "Producers"
+        case .logo: return "Upside-down logo"
         }
     }
     var blurb: String {
@@ -100,6 +104,7 @@ enum PatchID: String, CaseIterable, Identifiable {
         case .labels: return "Renames the English Genres menu to Labels (5 strings, same length)."
         case .composers: return "Picking a label opens its Composers instead of its Artists (1 bytecode operand)."
         case .producers: return "Renames the English Composers menu to Producers (5 strings, same length)."
+        case .logo: return "Flips the 78×100 boot logo in the aupd image (15,600 bytes, same size)."
         }
     }
 }
@@ -112,6 +117,7 @@ struct Device: Equatable {
     var volumeName: String?
     var mountPoint: String?
     var sysInfo: [String: String]
+    var capacity: Int? = nil    // whole disk, bytes
 
     var board: String? { sysInfo["BoardHwName"] }
     var modelNumber: String? { sysInfo["ModelNumStr"] }
@@ -171,6 +177,9 @@ struct PatchReport: Decodable {
     let patchable: Bool?
     // plan / build
     let applied: [String]?
+    let removed: [String]?
+    let result_states: [String: String]?
+    let result_stock: Bool?
     let new_checksum: UInt32?
     let output: String?
     let output_sha256: String?
