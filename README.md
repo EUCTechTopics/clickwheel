@@ -327,12 +327,17 @@ content-checked patches, and Claude Code as the guide.
 - [x] `patch.py --find TEXT`: read-only string search showing how many bytes each slot allows
 - [x] iPod photo / color (1.2.1) port, tested on a device
 - [x] Native Mac app (Clickwheel.app) with diff view, partition map and live menu preview
+- [x] Boot logo upside down on the iPod photo and the iPod Video; your own boot logo on the iPod photo
+- [x] Your own "Do not disconnect" picture on the iPod photo and the iPod Video (not yet tested on a device)
+- [ ] **Your own boot logo on the iPod Video** (next up; see [`docs/ROADMAP.md`](docs/ROADMAP.md))
 - [ ] **Custom renames:** `--rename OLD=NEW` for any English menu string that fits its slot,
       with the same content checks
 - [ ] Patch catalogue as data (one file per model/firmware) instead of code
 - [ ] Other languages
 - [ ] More browse orders (e.g. Label → Albums)
 - [ ] Read-only viewer for firmware resources (strings, then images and fonts)
+
+Details, status and what's needed for each item: [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 Contributions are welcome. Every new patch needs exact original bytes plus enough context to
 reject other firmware builds, and a test on a real device.

@@ -205,6 +205,7 @@ If the user prefers the app, explain that, and don't run it to change anything f
 | `app/` | Clickwheel, the macOS GUI (SwiftUI). `app/build_app.sh` builds `app/build/Clickwheel.app` |
 | `firmware/` | Firmware dumps and outputs. Git-ignored: contains Apple's firmware, never commit it. |
 | `docs/REVERSE_ENGINEERING.md` | How the patches were found; offsets and structures for extending them |
+| `docs/ROADMAP.md` | Features still to build, in order, with status and what each one needs |
 
 ## Extending
 
