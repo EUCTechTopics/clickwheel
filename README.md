@@ -1,13 +1,13 @@
 # Clickwheel
 
-> Firmware patches for the **iPod 4th generation (click wheel)** that turn the *Genres* menu into a
-> **Labels** browser. Built to be run with **Claude Code**, which guides you step by step.
+> Firmware patches for **click-wheel iPods**, the **iPod 4th generation** and the
+> **iPod Video (5th generation)**, that turn the *Genres* menu into a **Labels** browser.
+> Built to be run with **Claude Code**, which guides you step by step.
 
-![device](https://img.shields.io/badge/device-iPod%204G%20(Q21)-lightgrey)
-![firmware](https://img.shields.io/badge/firmware-3.1.1-blue)
+![iPod 4G](https://img.shields.io/badge/iPod%204G-tested%20on%20device-brightgreen)
+![iPod Video 5G](https://img.shields.io/badge/iPod%20Video%205G-experimental-orange)
 ![platform](https://img.shields.io/badge/host-macOS-black)
 ![claude code](https://img.shields.io/badge/guided%20by-Claude%20Code-d97757)
-![status](https://img.shields.io/badge/status-working%20on%20device-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
 If you use the iPod's *Genre* tag for the **record label**, this makes the menus match:
@@ -45,14 +45,23 @@ The image checksum is recalculated in every case.
 
 ## Compatibility
 
-| | Supported |
+| | iPod 4th generation | iPod Video (5th generation) |
+|---|---|---|
+| Status | **Tested on a device** | **Experimental**: patches built and checked, not yet confirmed on a device |
+| Identify | `BoardHwName: iPod Q21` (tested: M9282) | 64 MiB `Apple_MDFW` firmware partition |
+| Firmware | Apple **3.1.1** | The build whose `osos` image is `0x735A00` bytes (checked by `--check`) |
+| Patch flag | (default) | `--5g` |
+| Scripts | `backup_fw.sh`, `write_fw.sh`, `rollback_fw.sh` | `backup_fw_5g.sh`, `write_fw_5g.sh`, `rollback_fw_5g.sh` |
+| Storage mods | Works with iFlash (tested) | Not tested |
+
+On both models:
+
+| | |
 |---|---|
-| Device | iPod 4th generation, click wheel: `BoardHwName: iPod Q21` (tested: M9282) |
-| Firmware | Apple **3.1.1** |
 | Format | **Mac-formatted** iPod (has an `Apple_MDFW` firmware partition). Windows-formatted iPods aren't supported. |
-| Storage mods | Works with iFlash (tested) |
 | Host | macOS with `zsh` and Python 3 (standard library only) |
 | Menu language | **English**. Other languages are left as they are. |
+| Patches | All three (`--labels`, `--composers`, `--producers`), in any combination |
 
 The patcher checks the firmware's **content**: structure, image size, checksum, and the exact
 original bytes plus surrounding context at every patch location. On anything else (another
@@ -97,6 +106,16 @@ sudo scripts/write_fw.sh firmware/ipod_fw_patched.bin  # 5. write + read back an
 diskutil eject diskN                                   # 6. unplug, hold Menu + Select to reboot
 ```
 
+On an **iPod Video (5th gen)**, use the `--5g` flag and the `_5g` scripts. They take the
+firmware partition explicitly (find it with `diskutil list external`):
+
+```sh
+sudo scripts/backup_fw_5g.sh diskNs2                   # backup -> firmware/ipod5g_fw_backup.bin
+python3 scripts/patch.py --5g --check
+python3 scripts/patch.py --5g --labels --composers     # -> firmware/ipod5g_fw_patched.bin (add --producers if wanted)
+sudo scripts/write_fw_5g.sh diskNs2                    # writes only the sectors that differ
+```
+
 All scripts auto-detect the iPod's firmware partition. If more than one iPod is connected, pass
 the partition explicitly, e.g. `sudo scripts/write_fw.sh firmware/ipod_fw_patched.bin disk6s2`.
 
@@ -104,7 +123,9 @@ the partition explicitly, e.g. `sudo scripts/write_fw.sh firmware/ipod_fw_patche
 
 ## What the patches change
 
-Offsets are into the 32 MiB `Apple_MDFW` partition. The `osos` image (the main OS) starts at `0x4600`.
+The tables below are for the **iPod 4th generation**; the 5G offsets follow in
+[their own section](#ipod-video-5th-gen---5g). Offsets are into the 32 MiB `Apple_MDFW`
+partition. The `osos` image (the main OS) starts at `0x4600`.
 
 ### `--labels`: rename *Genres* → *Labels*
 
@@ -151,7 +172,7 @@ Labels string lowers it by `0x11` and each Producers string by `0x4`:
 
 ### iPod Video (5th gen): `--5g`
 
-Experimental port, same two patches, for the 5G build whose `osos` image is `0x735A00` bytes
+Experimental port of all three patches, for the 5G build whose `osos` image is `0x735A00` bytes
 (64 MiB partition, checksum `0x2C7C48F3` stock). Offsets are into the 64 MiB partition:
 
 | Patch | Offset | Old | New |
@@ -162,19 +183,13 @@ Experimental port, same two patches, for the 5G build whose `osos` image is `0x7
 
 Checksum with `--labels --composers`: `0x2C7C4881`. With all three: `0x2C7C486D` (at `0x421C`). The 5G partition also holds a
 hibernation image, so 5G images are written with `write_fw_5g.sh`, which writes only the 512-byte
-sectors that differ (all inside `osos`) and leaves the rest alone. Workflow:
-
-```
-sudo scripts/backup_fw_5g.sh diskNs2
-python3 scripts/patch.py --5g --check
-python3 scripts/patch.py --5g --labels --composers
-sudo scripts/write_fw_5g.sh diskNs2          # undo: sudo scripts/rollback_fw_5g.sh diskNs2
-```
+sectors that differ (all inside `osos`) and leaves the rest alone. Undo with
+`sudo scripts/rollback_fw_5g.sh diskNs2`.
 
 ## How it works
 
-The 3.1.1 UI is partly written as **bytecode for a small JavaScript-style VM** inside the
-firmware. Each browse category has its own small script handlers. When you pick a genre, the
+On both models, the UI is partly written as **bytecode for a small JavaScript-style VM**
+inside the firmware. The 5G uses the same VM, with its tables at different offsets. Each browse category has its own small script handlers. When you pick a genre, the
 handler records the selection and then calls a global "open Artists list" function. Patch 2
 points that call at the "open Composers list" function instead. The composer list is built with
 the same library query as the artist list, and picking a composer keeps the genre selected, so
@@ -189,7 +204,7 @@ are in [`docs/REVERSE_ENGINEERING.md`](docs/REVERSE_ENGINEERING.md).
 
 | Situation | What to do |
 |---|---|
-| Undo everything | `sudo scripts/rollback_fw.sh` writes your original backup back |
+| Undo everything | `sudo scripts/rollback_fw.sh` (5G: `sudo scripts/rollback_fw_5g.sh diskNs2`) writes your original backup back |
 | Different set of patches | Build the set you want (with `-o` for a new file name) and write it |
 | iPod doesn't boot (Apple logo, folder icon, reboot loop) | **Disk mode:** hold *Menu + Select* to reset. As soon as the Apple logo appears, switch to holding *Select + Play* until "Do not disconnect" appears. Connect it and run the rollback. |
 | Nothing else works | Restore in Finder/iTunes. This reinstalls stock firmware but **erases the music**. iFlash-modded iPods sometimes need extra steps; check iFlash's documentation. |
@@ -210,7 +225,9 @@ A Finder/iTunes **firmware update or restore** removes the patches. Just run the
 │   ├── backup_fw.sh          # sudo: dump the partition (read twice and compare)
 │   ├── patch.py              # build patched copies; --check to inspect
 │   ├── write_fw.sh           # sudo: write an image, read it back and compare
-│   └── rollback_fw.sh        # sudo: write the original backup back
+│   ├── rollback_fw.sh        # sudo: write the original backup back
+│   ├── *_5g.sh               # sudo: iPod Video backup / write / rollback
+│   └── write_sectors.py      # helper: write only the sectors that differ (5G)
 ├── docs/REVERSE_ENGINEERING.md
 └── firmware/                 # your dumps and outputs (git-ignored)
 ```
@@ -221,7 +238,8 @@ A Finder/iTunes **firmware update or restore** removes the patches. Just run the
 resources. This project aims for a smaller, safer take on that idea for macOS: verified backups,
 content-checked patches, and Claude Code as the guide.
 
-- [x] Verified backup / write / rollback for the 4G (and an experimental 5G port)
+- [x] Verified backup / write / rollback for the 4G and the iPod Video (5G, experimental)
+- [ ] Confirm the 5G patches on a device
 - [x] Menu renames: Genres → Labels, Composers → Producers
 - [x] Browse-order change: Label → Composers
 - [x] `patch.py --find TEXT`: read-only string search showing how many bytes each slot allows
@@ -242,9 +260,11 @@ reject other firmware builds, and a test on a real device.
   composers → albums → songs) is confirmed on a device. "All" entries, screen titles and
   "what plays next" haven't been specifically tested yet.
 - `--producers` only renames menu text; it uses the same mechanism as `--labels`, which is
-  confirmed on a device. The 5G port is experimental.
-- Firmware 3.1.1 on the 4th generation only. Porting to other versions means finding the offsets
-  again. The notes explain the method.
+  confirmed on a device.
+- The **5G port is experimental**. Its offsets were found statically on one 5G firmware build and
+  haven't been confirmed on a device yet. Other 5G builds are rejected by `--check`.
+- One firmware build per model: 3.1.1 on the 4G and one 5G build. Porting to other versions
+  means finding the offsets again. The notes explain the method.
 
 ## License
 

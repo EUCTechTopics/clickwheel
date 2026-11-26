@@ -1,7 +1,13 @@
 # CLAUDE.md: guide for Claude Code in this repository
 
-This repo patches the Apple firmware of an **iPod 4th generation (click wheel, "iPod Q21") running
-firmware 3.1.1** so that:
+This repo patches the Apple firmware of click-wheel iPods. It supports two models:
+
+- **iPod 4th generation** (click wheel, "iPod Q21") with firmware 3.1.1: **tested on a device**.
+- **iPod Video (5th generation)**, one firmware build (`osos` 0x735A00 bytes): **experimental**.
+  The patches are built and checked but not yet confirmed on a device. Say so before the user
+  writes anything to a 5G.
+
+The patches, available on both models, are:
 
 1. `--labels`: the English menu label **Genres** becomes **Labels**.
 2. `--composers`: picking a genre/label shows **Composers** instead of **Artists**
@@ -21,12 +27,14 @@ changes something.
   `rollback_fw.sh`) are run **by the user**, by typing `! sudo scripts/<script>` in the Claude
   Code prompt. You can't enter their password, and device writes must stay their decision.
   Never run `dd`, `diskutil eraseDisk/partitionDisk`, or anything else that writes to `/dev/*`.
-- **Never modify or delete `firmware/ipod_fw_backup.bin`** or its `.sha256`. It's the only way back.
+- **Never modify or delete `firmware/ipod_fw_backup.bin` or `firmware/ipod5g_fw_backup.bin`**, or
+  their `.sha256` files. They're the only way back.
 - **Patch copies only.** `scripts/patch.py` writes a new file and refuses to overwrite. Don't
   bypass its checks, and don't hand-edit firmware bytes outside it.
-- **Unsupported device or firmware → stop.** If the model isn't `iPod Q21`, the firmware isn't
-  3.1.1, the iPod is Windows-formatted (no `Apple_MDFW` partition), or `patch.py --check`
-  reports `mismatch`, explain that the patch doesn't apply and don't continue. Offsets are
+- **Unsupported device or firmware → stop.** If the iPod is neither a 4G (`iPod Q21`, 3.1.1) nor
+  an iPod Video whose dump passes `patch.py --5g --check`, if it's Windows-formatted (no
+  `Apple_MDFW` partition), or if `--check` reports `mismatch`, explain that the patch doesn't
+  apply and don't continue. Offsets are
   firmware-specific. Porting is possible (see `docs/REVERSE_ENGINEERING.md`), but only as a
   separate, explicitly requested analysis that follows the same gated process.
 - **Report honestly.** Show the script output that matters (sizes, hashes, `OK:` lines). If
@@ -38,6 +46,11 @@ changes something.
 Run `scripts/ipod_info.sh`. Confirm with the user:
 - the firmware partition (e.g. `disk6s2`, type `Apple_MDFW`, 33,554,432 bytes),
 - `BoardHwName: iPod Q21` and `buildID ... (3.1.1)` from SysInfo.
+
+If `ipod_info.sh` reports a partition that isn't 33,554,432 bytes, check with
+`diskutil list external` and `diskutil info diskNs2`. A **67,108,864-byte** `Apple_MDFW` partition
+means an iPod Video (5G), whose SysInfo may be empty. Continue with the 5G workflow at the end of
+this file.
 
 If SysInfo isn't shown, the data volume isn't mounted. Ask the user to reconnect the iPod or
 mount it in Finder. If there are several iPods, ask which partition to use and pass it to every
@@ -102,9 +115,19 @@ Tell the user to:
 - A Finder/iTunes firmware update or restore removes the patches. Re-run the workflow.
 
 ### iPod Video (5th gen)
-An experimental port exists (`patch.py --5g`, see README). Same workflow and the same rules, using the
-`*_5g.sh` scripts, which take the partition explicitly. Its offsets were found statically against
-one 5G build. The `--check` content checks decide whether another 5G applies.
+Same workflow and the same rules, with these differences:
+
+- **Tell the user up front that the 5G port is experimental:** built and checked against one
+  firmware build, not yet confirmed on a device. Make sure they've read the recovery steps.
+- The scripts take the partition explicitly (no auto-detect), so confirm it first.
+- Back up: `! sudo scripts/backup_fw_5g.sh diskNs2` → `firmware/ipod5g_fw_backup.bin`.
+- Check / build: `python3 scripts/patch.py --5g --check`, then
+  `python3 scripts/patch.py --5g --labels --composers [--producers]` → `firmware/ipod5g_fw_patched.bin`.
+- Write: `! sudo scripts/write_fw_5g.sh diskNs2`. It writes only the 512-byte sectors that differ
+  (the partition also holds a hibernation image, which must be left alone).
+- Undo: `! sudo scripts/rollback_fw_5g.sh diskNs2`.
+- Reboot and test as for the 4G. If it works, ask the user whether they want the README's
+  "experimental" status updated.
 
 ## Repository map
 
