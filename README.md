@@ -31,7 +31,7 @@ All patches are tiny in-place byte changes, and you can pick any combination:
 | `--labels` | *Genres* → *Labels* (English menus) | 5 strings |
 | `--composers` | Picking a label shows Composers instead of Artists | 1 byte |
 | `--producers` | *Composers* → *Producers* (English menus) | 5 strings |
-| `--logo` | iPod photo / color only: the boot Apple logo upside down (it lives in the `aupd` image; tested on a device) | 15,600 bytes |
+| `--logo` | iPod photo / color and iPod Video: the boot Apple logo upside down (it lives in the `aupd` image; tested on both) | 15,600 / 9,552 bytes |
 
 The image checksum is recalculated in every case.
 

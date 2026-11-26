@@ -91,7 +91,9 @@ def write_limit(a, b, name):
                 die(f"ABORT: the images differ at 0x{s:x}, outside osos and aupd; refusing")
             limit = aupd[1]
     for typ, (start, end) in imgs.items():
-        if typ not in ("osos", "aupd") and start < limit:
+        # rsrc (iPod Video, between osos and aupd) is static: read back, never written. Anything else
+        # (the hibernation image, which the iPod rewrites) must lie beyond the area.
+        if typ not in ("osos", "rsrc", "aupd") and start < limit:
             die(f"ABORT: the {typ} image lies inside the area to be written; refusing")
     return limit
 

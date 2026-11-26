@@ -15,14 +15,14 @@ The patches, available on all models, are:
 3. `--producers`: the English menu label **Composers** becomes **Producers** (for people who
    store the producer in the Composer tag).
 
-4. `--logo` (**iPod photo / color only**, **tested on a device**): turns the boot Apple logo upside down. The 78×100 RGB565
-   logo sits in the encrypted `aupd` image; the patch XORs a fixed delta
-   (`scripts/patchdata/photo_logo.xor`, from an iPodWizard flip that worked on the device) and only
-   applies when the region's sha256 is exactly stock or exactly flipped. A build that changes aupd also
-   sets the aupd "flashed" flag (`0x4230`) to 0, so the iPod copies aupd into its boot ROM at the next
-   start; `--reflash` does only that. The build reproduces the
-   iPodWizard dump byte for byte. The 4G has no such patch: flipping its grey 84×100 picture did not
-   change its boot logo (tested). The 5G logo is not done yet; see `docs/REVERSE_ENGINEERING.md`.
+4. `--logo` (**iPod photo / color and iPod Video**, both **tested on a device**): turns the boot Apple logo upside down. The logo sits in the encrypted `aupd`
+   image. The patch XORs a fixed delta (`scripts/patchdata/photo_logo.xor`, `5g_logo.xor`, from
+   iPodWizard flips that worked on the devices) and only applies when the region's sha256 is exactly
+   stock or exactly flipped; on the Video it also switches aupd's checksum field between the two known
+   values. A build that changes aupd sets aupd's "flashed" flag (photo `0x4230`, Video `0x4258`) to 0,
+   so the iPod copies aupd into its boot ROM at the next start; `--reflash` does only that. Builds
+   reproduce the iPodWizard dumps byte for byte (apart from that flag). The 4G has no such patch:
+   flipping its grey 84×100 picture did not change its boot logo (tested).
 
 The user typically just cloned the repo and says something like "patch my iPod". Walk them
 through the workflow below, one stage at a time. The user may not be technical. Explain each
@@ -136,7 +136,7 @@ Same workflow and the same rules, with these differences:
 - The scripts take the partition explicitly (no auto-detect), so confirm it first.
 - Back up: `! sudo scripts/backup_fw_5g.sh diskNs2` → `firmware/ipod5g_fw_backup.bin`.
 - Check / build: `python3 scripts/patch.py --5g --check`, then
-  `python3 scripts/patch.py --5g --labels --composers [--producers]` → `firmware/ipod5g_fw_patched.bin`.
+  `python3 scripts/patch.py --5g --labels --composers [--producers] [--logo]` → `firmware/ipod5g_fw_patched.bin`.
 - Write: `! sudo scripts/write_fw_5g.sh diskNs2`. It writes only the 512-byte sectors that differ
   (the partition also holds a hibernation image, which must be left alone).
 - Undo: `! sudo scripts/rollback_fw_5g.sh diskNs2`.

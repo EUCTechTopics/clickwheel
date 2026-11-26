@@ -23,7 +23,7 @@ Patches:
   --labels     rename the English "Genres" menu labels to "Labels" (5 strings)
   --composers  after picking a genre/label, show Composers instead of Artists (1 byte)
   --producers  rename the English "Composers" menu labels to "Producers" (5 strings)
-  --logo       iPod photo only: the boot Apple logo upside down (15,600 bytes in the aupd image)
+  --logo       iPod photo and iPod Video: the boot Apple logo upside down (in the encrypted aupd image)
 
 --exact: build exactly the selection. Patches that are named are applied; patches that are not named
 are put back to their original bytes (removed) if the input has them. Without --exact a build only
@@ -69,6 +69,7 @@ MODELS = {
         'part_size': 67108864,
         'osos_len': 0x735A00,
         'input': 'ipod5g_fw_backup.bin',
+        'aupd_flashed': 0x4258,         # aupd is the third directory entry (see the photo's note)
         'output': 'ipod5g_fw_patched.bin',
         'patches': {
             'labels': {
@@ -84,6 +85,19 @@ MODELS = {
             'producers': {
                 'desc': 'English "Composers" -> "Producers" (5 menu strings)',
                 'edits': [(o, b'Composers', b'Producers') for o in (0x4B5A0C, 0x4B6744, 0x4B7FA6, 0x4B814C, 0x4B884C)],
+                'context': [],
+            },
+            'logo': {
+                # Boot logo (iPodWizard picture index 417) in the encrypted aupd image, as on the iPod photo.
+                # The delta is the XOR of the stock and the iPodWizard-flipped bytes (tested on a device);
+                # unlike the photo, the 5G's aupd checksum field changes with it.
+                'desc': 'Boot Apple logo (in aupd) upside down',
+                'xor': {'image': 'aupd', 'offset': 0xCF9E5C, 'length': 9552, 'delta': '5g_logo.xor',
+                        'delta_sha256': 'c1921e6edd619643d1cb900b1f248b0d036a0af7832b716f9c743b23a07a83f3',
+                        'original_sha256': '822498a8b4a3612292b0be415ac33274a47646517e1e0468c091299840902d05',
+                        'applied_sha256': '9f21a07a49f2c46428fdf5277e85ec9f625c8057d1d3f2483105560a2cd53bcc',
+                        # aupd checksum in its directory entry: stock -> flipped
+                        'checksum': (0x426C, bytes.fromhex('1cdb190b'), bytes.fromhex('5c3b1a0b'))},
                 'context': [],
             },
         },
@@ -150,10 +164,11 @@ def xor_edits(buf, p):
     cur = bytes(buf[o:o + n])
     other = bytes(c ^ d for c, d in zip(cur, delta))
     h = hashlib.sha256(cur).hexdigest()
+    extra = [x['checksum']] if 'checksum' in x else []
     if h == x['original_sha256']:
-        return [(o, cur, other)]
+        return [(o, cur, other)] + extra
     if h == x['applied_sha256']:
-        return [(o, other, cur)]
+        return [(o, other, cur)] + extra
     return None
 
 def fail(msg):
@@ -243,9 +258,9 @@ def main():
     ap.add_argument('--labels', action='store_true', help='English "Genres" -> "Labels"')
     ap.add_argument('--composers', action='store_true', help='Genre/Label list opens Composers instead of Artists')
     ap.add_argument('--producers', action='store_true', help='English "Composers" -> "Producers"')
-    ap.add_argument('--logo', action='store_true', help='iPod photo only: boot Apple logo upside down')
+    ap.add_argument('--logo', action='store_true', help='iPod photo and iPod Video: boot Apple logo upside down')
     ap.add_argument('--reflash', action='store_true',
-                    help='iPod photo only: mark aupd as not yet flashed, so the iPod copies it into its boot ROM at the next start')
+                    help='iPod photo and iPod Video: mark aupd as not yet flashed, so the iPod copies it into its boot ROM at the next start')
     ap.add_argument('--exact', action='store_true',
                     help='unnamed patches are removed (original bytes restored); with no patch named: remove all')
     ap.add_argument('--check', action='store_true', help='only inspect the input and report')
@@ -328,6 +343,9 @@ def main():
             if name not in imgs:
                 fail(f'patch "{n}": no {name} image in this firmware')
             regions.append((imgs[name]['offset'], imgs[name]['offset'] + imgs[name]['length']))
+            if 'checksum' in patches[n]['xor']:     # that image's checksum field in the directory
+                c = patches[n]['xor']['checksum'][0]
+                regions.append((c, c + 4))
         if not any(a <= o and o + size <= b for a, b in regions):
             fail(f'0x{o:x} is outside the images patch "{n}" may change')
 

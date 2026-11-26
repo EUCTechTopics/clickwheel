@@ -55,8 +55,8 @@ enum IPodModel: String, CaseIterable, Identifiable, Codable {
 enum PatchID: String, CaseIterable, Identifiable {
     case labels, composers, producers, logo
     var id: String { rawValue }
-    /// Offered for this model? The boot-logo flip exists only for the iPod photo / color so far.
-    func available(on model: IPodModel?) -> Bool { self != .logo || model == .photo }
+    /// Offered for this model? The boot-logo flip exists for the iPod photo / color and the iPod Video.
+    func available(on model: IPodModel?) -> Bool { self != .logo || model == .photo || model == .g5 }
     var title: String {
         switch self {
         case .labels: return "Genres → Labels"
@@ -104,7 +104,7 @@ enum PatchID: String, CaseIterable, Identifiable {
         case .labels: return "Renames the English Genres menu to Labels (5 strings, same length)."
         case .composers: return "Picking a label opens its Composers instead of its Artists (1 bytecode operand)."
         case .producers: return "Renames the English Composers menu to Producers (5 strings, same length)."
-        case .logo: return "Flips the 78×100 boot logo in the aupd image (15,600 bytes, same size)."
+        case .logo: return "Flips the boot logo in the aupd image (same size); the iPod copies it into its boot ROM at the next start."
         }
     }
 }

@@ -231,4 +231,14 @@ Pictures are stored uncompressed inside `osos`, each with a small header followe
   boot ROM when it finds 0, then sets 1. `patch.py` resets it whenever a build changes `aupd`, and
   `--reflash` resets it on its own. Tested on a device: with the flag at 0 the iPod flashed
   aupd at the next start and showed the flipped logo.
-- **iPod Video**: not done yet. The same method should work: dump, flip in iPodWizard, dump again, compare.
+- **iPod Video boot logo (`--5g --logo`)**: iPodWizard picture index 417 (the osos has ~400
+  pictures; iPodWizard lists the decrypted aupd pictures after them). aupd: partition `0xC3A400`,
+  `0x106400` bytes, encrypted; rsrc lies between osos and aupd, hibe after it (`0xD40C00`). A dump
+  before and after an iPodWizard flip differs only in `0xCF9E5C`–`0xCFC3AB` (9,552 bytes, rows of 124
+  bytes) and in aupd's directory entry: the checksum (`0x426C`: `0x0B19DB1C` → `0x0B1A3B5C`) and the
+  u32 at `0x4274` (`0xFFFFFFFF` → `0x10000000`, apparently written by the iPod after flashing; the
+  patch leaves it alone). Unlike the photo, the XOR of the two versions is not row-symmetric, so the
+  cipher (or iPodWizard's re-encoding) is not a plain XOR stream; that doesn't matter, because the
+  patch only maps the exact stock bytes to the exact flipped bytes and back. The aupd "flashed" flag
+  is at `0x4258`. `write_fd.py` lets a write reach to the end of aupd (rsrc is only read back) and
+  refuses anything at or beyond hibe. Tested on a device through Clickwheel in both directions.
