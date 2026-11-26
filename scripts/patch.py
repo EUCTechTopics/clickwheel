@@ -23,7 +23,9 @@ Patches:
   --labels     rename the English "Genres" menu labels to "Labels" (5 strings)
   --composers  after picking a genre/label, show Composers instead of Artists (1 byte)
   --producers  rename the English "Composers" menu labels to "Producers" (5 strings)
+  --dnd FILE   iPod photo and iPod Video: your own "Do not disconnect" picture (100x100 BMP; "keep" = keep the current one)
   --logo       iPod photo and iPod Video: the boot Apple logo upside down (in the encrypted aupd image)
+  --logo-image FILE   iPod photo: your own boot logo (78x100 BMP; "keep" = keep the current one)
 
 --exact: build exactly the selection. Patches that are named are applied; patches that are not named
 are put back to their original bytes (removed) if the input has them. Without --exact a build only
@@ -100,6 +102,14 @@ MODELS = {
                         'checksum': (0x426C, bytes.fromhex('1cdb190b'), bytes.fromhex('5c3b1a0b'))},
                 'context': [],
             },
+            'dnd': {
+                # The "Do not disconnect" picture (iPodWizard index 372, ID 25561): 100x100 RGB565 in osos, with
+                # the 5G's 28-byte picture header. Apple's pixels are identical to the iPod photo's.
+                'desc': '"Do not disconnect" picture (100x100) replaced by your own BMP',
+                'picture': {'header': 0x496918, 'layout': '5g', 'height': 100, 'width': 100, 'row_bytes': 200, 'bpp': 16,
+                            'original_sha256': 'd988199fbbff1f087b1285f970ea577ce7feb082164e00725cae1b356cd844e3'},
+                'context': [],
+            },
         },
     },
     'photo': {
@@ -133,17 +143,28 @@ MODELS = {
                 'edits': [(o, b'Composers', b'Producers') for o in (0x271774, 0x271D6C, 0x2735D2, 0x2737B8, 0x273DD4)],
                 'context': [],
             },
+            'dnd': {
+                # The "Do not disconnect" picture (iPodWizard index 97, ID 13115): 100x100 RGB565 in osos,
+                # replaced by the user's own BMP. Any content counts as 'applied'; 'original' is Apple's.
+                'desc': '"Do not disconnect" picture (100x100) replaced by your own BMP',
+                'picture': {'header': 0x247A08, 'height': 100, 'width': 100, 'row_bytes': 200, 'bpp': 16,
+                            'original_sha256': 'd988199fbbff1f087b1285f970ea577ce7feb082164e00725cae1b356cd844e3'},
+                'context': [],
+            },
             'logo': {
-                # The 78x100 RGB565 boot logo lives in the encrypted aupd image (flashed into the boot ROM),
-                # not in osos. The encryption is a position-based XOR stream, so flipping the picture upside
-                # down = XOR with a fixed delta (stock ^ flipped ciphertext, taken from an iPodWizard flip that
-                # was tested on a device). Row reversal keeps the decrypted byte sum, so the aupd checksum
-                # field stays valid; iPodWizard leaves it unchanged too.
-                'desc': 'Boot Apple logo (78x100, in aupd) upside down',
-                'xor': {'image': 'aupd', 'offset': 0x5DDAB4, 'length': 15600, 'delta': 'photo_logo.xor',
-                        'delta_sha256': '028f5e2955fed46e94621f7747183e64c57c7011b06e43ba46a11519366c761d',
-                        'original_sha256': '8bdcf822435e134db63cb4cee80ceb0f83d08ffe393bd3c9c58f47e9e02eceec',
-                        'applied_sha256': 'df328b32b5689ec01b8782a5e2706b99612c100f132e294c5c61a6031b4c93a5'},
+                # The 78x100 RGB565 boot logo (iPodWizard index 179) lives in the encrypted aupd image. The
+                # encryption is a position-based XOR stream; the key for the logo's 15,600 bytes was
+                # recovered from three dumps (stock, iPodWizard-flipped, iPodWizard custom picture with
+                # its BMP), and checked against all three. The aupd checksum (directory field 0x4244) is
+                # the byte sum of the decrypted aupd, so it moves by the change in the pixel byte sum.
+                'desc': 'Boot Apple logo (78x100, in aupd): upside down, or your own BMP',
+                'cipher': {'image': 'aupd', 'offset': 0x5DDAB4, 'height': 100, 'width': 78, 'row_bytes': 156,
+                           'key': 'photo_logo.key',
+                           'key_sha256': '1fa3e45fb36e0f2e7b1c34b2d4997592912bcacc46623f5251c68e4e4f7111da',
+                           'stock_sha256': '5153e22e0eb08008e9523a188aa1c57b70f0693c175e7caef4afe7dd19eb65c4',
+                           # the rest of aupd (logo bytes zeroed) must be exactly this, or the key doesn't apply
+                           'rest_sha256': '6e16120827071e7746286bd2794affeb955188ce973abe843a1b434881f5652b',
+                           'checksum': 0x4244},
                 'context': [],
             },
         },
@@ -170,6 +191,90 @@ def xor_edits(buf, p):
     if h == x['applied_sha256']:
         return [(o, other, cur)] + extra
     return None
+
+def flip_rows(d, row_bytes, height):
+    return b''.join(d[r * row_bytes:(r + 1) * row_bytes] for r in reversed(range(height)))
+
+def cipher_key(x):
+    k = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'patchdata', x['key']), 'rb').read()
+    if len(k) != x['height'] * x['row_bytes'] or hashlib.sha256(k).hexdigest() != x['key_sha256']:
+        fail(f'scripts/patchdata/{x["key"]} is missing or damaged')
+    return k
+
+def cipher_plain(buf, x):
+    """The decrypted picture of a 'cipher' patch, or None when the image around it isn't the expected one."""
+    img = {i['type']: i for i in images(buf)}.get(x['image'])
+    n = x['height'] * x['row_bytes']
+    o = x['offset']
+    if not img or not (img['offset'] <= o and o + n <= img['offset'] + img['length']):
+        return None
+    rest = bytearray(buf[img['offset']:img['offset'] + img['length']])
+    rest[o - img['offset']:o - img['offset'] + n] = bytes(n)
+    if hashlib.sha256(rest).hexdigest() != x['rest_sha256']:
+        return None
+    return bytes(c ^ k for c, k in zip(buf[o:o + n], cipher_key(x)))
+
+def cipher_state(buf, x):
+    plain = cipher_plain(buf, x)
+    if plain is None:
+        return 'mismatch'
+    if hashlib.sha256(plain).hexdigest() == x['stock_sha256']:
+        return 'original'
+    if hashlib.sha256(flip_rows(plain, x['row_bytes'], x['height'])).hexdigest() == x['stock_sha256']:
+        return 'applied'
+    return 'custom'
+
+def read_bmp(path, width, height):
+    """A BMP file as RGB565 little-endian pixels, top row first (the iPod's format). Accepts 16-bit
+    (RGB565 bitfields or RGB555), 24-bit and 32-bit uncompressed BMPs of exactly width x height."""
+    try:
+        b = open(path, 'rb').read()
+    except OSError as e:
+        fail(f'cannot read {path}: {e.strerror}')
+    if b[:2] != b'BM' or len(b) < 54:
+        fail(f'{os.path.basename(path)} is not a BMP file')
+    off = struct.unpack_from('<I', b, 10)[0]
+    w, h = struct.unpack_from('<ii', b, 18)
+    bpp, comp = struct.unpack_from('<HI', b, 28)
+    if (w, abs(h)) != (width, height):
+        fail(f'{os.path.basename(path)} is {w}x{abs(h)}; it must be exactly {width}x{height}')
+    masks = struct.unpack_from('<III', b, 54) if comp == 3 and len(b) >= 66 else None
+    if not ((bpp in (24, 32) and comp in (0, 3)) or (bpp == 16 and comp in (0, 3))):
+        fail(f'{os.path.basename(path)}: {bpp}-bit BMP (compression {comp}) is not supported; save it as 16- or 24-bit')
+    rb = (w * bpp + 31) // 32 * 4
+    if off + rb * abs(h) > len(b):
+        fail(f'{os.path.basename(path)} is truncated')
+    out = bytearray()
+    rows = range(abs(h) - 1, -1, -1) if h > 0 else range(abs(h))     # positive height = bottom-up
+    for r in rows:
+        row = b[off + r * rb:off + r * rb + rb]
+        for x in range(w):
+            if bpp == 16:
+                v = row[2 * x] | row[2 * x + 1] << 8
+                if masks == (0xF800, 0x07E0, 0x001F):
+                    px = v
+                elif comp == 0 or masks == (0x7C00, 0x03E0, 0x001F):     # RGB555
+                    px = (v & 0x7C00) << 1 | (v & 0x03E0) << 1 | (v & 0x03E0) >> 4 & 0x20 | v & 0x1F
+                else:
+                    fail(f'{os.path.basename(path)}: unsupported 16-bit colour masks')
+            else:
+                bb, gg, rr = row[x * (bpp // 8):x * (bpp // 8) + 3]
+                px = (rr * 31 // 255) << 11 | (gg * 63 // 255) << 5 | bb * 31 // 255     # as iPodWizard does
+            out += struct.pack('<H', px)
+    return bytes(out)
+
+def picture_region(buf, p):
+    """(offset, length) of a 'picture' patch's pixels, or None when the header isn't the expected one."""
+    f = p['picture']
+    n = f['height'] * f['row_bytes']
+    if f.get('layout') == '5g':     # u32 format (0x565 = RGB565), u16 row bytes, u16 bpp, 0, 0, height, width, length
+        hdr = struct.pack('<IHHIIIII', 0x565, f['row_bytes'], f['bpp'], 0, 0, f['height'], f['width'], n)
+    else:                           # 4G / photo: height, width, u16 row bytes, u16 bpp, 0, length
+        hdr = struct.pack('<IIHHII', f['height'], f['width'], f['row_bytes'], f['bpp'], 0, n)
+    o = f['header']
+    if bytes(buf[o:o + len(hdr)]) != hdr:
+        return None
+    return o + len(hdr), n
 
 def fail(msg):
     if JSON:
@@ -217,6 +322,18 @@ def images(buf):
 
 def state(buf, p):
     """'original', 'applied' or 'mismatch' for one patch."""
+    if 'cipher' in p:        # decrypted: Apple's, Apple's flipped, or another picture ('custom')
+        return cipher_state(buf, p['cipher'])
+    if 'xor' in p:           # stock / flipped by sha256; anything else is a picture put there by another tool
+        x = p['xor']
+        h = hashlib.sha256(bytes(buf[x['offset']:x['offset'] + x['length']])).hexdigest()
+        return 'original' if h == x['original_sha256'] else 'applied' if h == x['applied_sha256'] else 'custom'
+    if 'picture' in p:       # any content is 'applied' (a custom picture); Apple's pixels are 'original'
+        r = picture_region(buf, p)
+        if r is None:
+            return 'mismatch'
+        o, n = r
+        return 'original' if hashlib.sha256(bytes(buf[o:o + n])).hexdigest() == p['picture']['original_sha256'] else 'applied'
     if p['edits'] is None:
         return 'mismatch'
     for a, pre, b, post in p['context']:
@@ -258,6 +375,13 @@ def main():
     ap.add_argument('--labels', action='store_true', help='English "Genres" -> "Labels"')
     ap.add_argument('--composers', action='store_true', help='Genre/Label list opens Composers instead of Artists')
     ap.add_argument('--producers', action='store_true', help='English "Composers" -> "Producers"')
+    ap.add_argument('--dnd', metavar='FILE.bmp',
+                    help='iPod photo and iPod Video: your own "Do not disconnect" picture (100x100 BMP); "keep" keeps the one on the iPod')
+    ap.add_argument('--originals', metavar='DIR',
+                    help='where Apple\'s original pictures are saved before a custom one replaces them '
+                         '(default: an "originals" folder next to the input)')
+    ap.add_argument('--logo-image', metavar='FILE.bmp',
+                    help='iPod photo: your own boot logo (78x100 BMP) instead of the flipped one; "keep" keeps the one on the iPod')
     ap.add_argument('--logo', action='store_true', help='iPod photo and iPod Video: boot Apple logo upside down')
     ap.add_argument('--reflash', action='store_true',
                     help='iPod photo and iPod Video: mark aupd as not yet flashed, so the iPod copies it into its boot ROM at the next start')
@@ -282,8 +406,13 @@ def main():
         fail(f'{a.input} not found (make the backup first)')
     orig = open(a.input, 'rb').read()
     start, length, chk = osos_info(orig, m)
-    patches = {n: dict(p, edits=xor_edits(orig, p)) if 'xor' in p else p for n, p in patches.items()}
-    for n in ('labels', 'composers', 'producers', 'logo'):
+    patches = {n: dict(p, edits=xor_edits(orig, p)) if 'xor' in p else dict(p, edits=[]) if 'picture' in p or 'cipher' in p else p
+               for n, p in patches.items()}
+    if a.logo_image and not ('logo' in patches and 'cipher' in patches['logo']):
+        fail(f'--logo-image is not available for {m["name"]}')
+    if a.logo_image and a.logo:
+        fail('choose --logo (flip) or --logo-image (your own picture), not both')
+    for n in ('labels', 'composers', 'producers', 'logo', 'dnd'):
         if getattr(a, n) and n not in patches:
             fail(f'--{n} is not available for {m["name"]}')
     if a.find:
@@ -321,13 +450,93 @@ def main():
         print('\nOK: patchable.')
         return
 
-    wanted = [n for n in patches if getattr(a, n)]
-    removed = [n for n in patches if a.exact and n not in wanted and states[n] != 'original']
+    wanted = [n for n in patches if getattr(a, n) or (n == 'logo' and a.logo_image)]
+    # 'custom' on an 'xor' patch (a picture another tool put on) is left alone; a 'cipher' patch can replace it
+    leave = [n for n in patches if states[n] == 'custom' and 'cipher' not in patches[n]]
+    removed = [n for n in patches if a.exact and n not in wanted and states[n] != 'original' and n not in leave]
+    for n in wanted:
+        if n in leave:
+            fail(f'patch "{n}": the iPod has its own picture there (put on with another tool); Clickwheel leaves it alone')
     if not wanted and not a.exact and not a.reflash:
         fail('choose at least one patch: --labels, --composers, --producers (or --exact, --check / --find)')
     for n in wanted + removed:
         if states[n] == 'mismatch':
             fail(f'patch "{n}": the firmware does not contain the expected bytes')
+    originals = a.originals or os.path.join(os.path.dirname(os.path.abspath(a.input)), 'originals')
+    save_originals = []
+    for n in wanted + removed:
+        p = patches[n]
+        if 'picture' not in p:
+            continue
+        o, size = picture_region(orig, p)
+        cur = bytes(orig[o:o + size])
+        keep = os.path.join(originals, f'{model}-{n}.bin')
+        if n in wanted:
+            arg = getattr(a, n)
+            if arg == 'keep':
+                if states[n] != 'applied':
+                    fail(f'--{n} keep: the iPod has no custom picture to keep')
+                new_px = cur
+            else:
+                f = p['picture']
+                new_px = read_bmp(arg, f['width'], f['height'])
+                if hashlib.sha256(new_px).hexdigest() == f['original_sha256']:
+                    fail(f'{os.path.basename(arg)} is Apple\'s original picture; switch the change off instead')
+            if states[n] == 'original':
+                save_originals.append((keep, cur))
+            p['edits'] = [(o, cur, new_px)]
+        else:
+            try:
+                saved = open(keep, 'rb').read()
+            except OSError:
+                fail(f'patch "{n}": Apple\'s original picture was not saved ({keep}); cannot put it back')
+            if hashlib.sha256(saved).hexdigest() != p['picture']['original_sha256']:
+                fail(f'patch "{n}": {keep} is not Apple\'s original picture')
+            p['edits'] = [(o, saved, cur)]
+    for n in wanted + removed:
+        p = patches[n]
+        if 'cipher' not in p:
+            continue
+        x = p['cipher']
+        size = x['height'] * x['row_bytes']
+        key = cipher_key(x)
+        cur = cipher_plain(orig, x)
+        keep = os.path.join(originals, f'{model}-{n}.bin')
+        if states[n] == 'original':
+            stock_px = cur
+        elif states[n] == 'applied':
+            stock_px = flip_rows(cur, x['row_bytes'], x['height'])
+        else:
+            try:
+                stock_px = open(keep, 'rb').read()
+            except OSError:
+                stock_px = None
+            if stock_px is not None and hashlib.sha256(stock_px).hexdigest() != x['stock_sha256']:
+                fail(f'patch "{n}": {keep} is not Apple\'s original picture')
+        if states[n] in ('original', 'applied'):
+            save_originals.append((keep, stock_px))
+        if n in removed or not a.logo_image:          # back to Apple's, or Apple's flipped
+            if stock_px is None:
+                fail(f'patch "{n}": Apple\'s original picture was not saved ({keep}); cannot put it back')
+            target = stock_px if n in removed else flip_rows(stock_px, x['row_bytes'], x['height'])
+        elif a.logo_image == 'keep':
+            if states[n] != 'custom':
+                fail('--logo-image keep: the iPod has no own boot logo to keep')
+            target = cur
+        else:
+            target = read_bmp(a.logo_image, x['width'], x['height'])
+            h = hashlib.sha256(target).hexdigest()
+            if h == x['stock_sha256'] or hashlib.sha256(flip_rows(target, x['row_bytes'], x['height'])).hexdigest() == x['stock_sha256']:
+                fail(f'{os.path.basename(a.logo_image)} is Apple\'s logo; use --logo, or switch the change off')
+        o = x['offset']
+        c_old = bytes(orig[o:o + size])
+        c_new = bytes(t ^ k for t, k in zip(target, key))
+        f = x['checksum']
+        old_chk = struct.unpack_from('<I', orig, f)[0]
+        new_chk_a = (old_chk + sum(target) - sum(cur)) & 0xFFFFFFFF
+        edits = [(o, c_old, c_new), (f, struct.pack('<I', old_chk), struct.pack('<I', new_chk_a))]
+        # removals are applied as (offset, restored bytes, current bytes), like the other patches
+        p['edits'] = [(e, new, old) for e, old, new in edits] if n in removed else edits
     if not a.plan and os.path.exists(a.output):
         fail(f'{a.output} already exists; refusing to overwrite')
 
@@ -338,13 +547,14 @@ def main():
     def inside(n, o, size):
         # every edit stays in osos, or in the one other image an 'xor' patch names (e.g. aupd)
         regions = [(start, start + length)]
-        name = patches[n].get('xor', {}).get('image')
+        spec = patches[n].get('xor') or patches[n].get('cipher') or {}
+        name = spec.get('image')
         if name:
             if name not in imgs:
                 fail(f'patch "{n}": no {name} image in this firmware')
             regions.append((imgs[name]['offset'], imgs[name]['offset'] + imgs[name]['length']))
-            if 'checksum' in patches[n]['xor']:     # that image's checksum field in the directory
-                c = patches[n]['xor']['checksum'][0]
+            if 'checksum' in spec:                  # that image's checksum field in the directory
+                c = spec['checksum'][0] if isinstance(spec['checksum'], tuple) else spec['checksum']
                 regions.append((c, c + 4))
         if not any(a <= o and o + size <= b for a, b in regions):
             fail(f'0x{o:x} is outside the images patch "{n}" may change')
@@ -381,7 +591,8 @@ def main():
     if osos_info(bytes(buf), m)[2] != new_chk:
         fail('verification failed: checksum')
     result = {n: state(bytes(buf), dict(p, edits=xor_edits(buf, p)) if 'xor' in p else p) for n, p in patches.items()}
-    expect = {n: 'applied' if n in wanted else 'original' if n in removed else states[n] for n in patches}
+    expect = {n: ('custom' if n == 'logo' and a.logo_image else 'applied') if n in wanted
+              else 'original' if n in removed else states[n] for n in patches}
     if result != expect:
         fail(f'verification failed: patch states after the build are {result}, expected {expect}')
     result_stock = (hashlib.sha256(buf[start:start + length]).hexdigest() == stock) if stock else None
@@ -393,6 +604,12 @@ def main():
                    'output_sha256': sha, 'sectors': sorted({i // 512 * 512 for i in diff}),
                    'changes': [{'offset': i, 'old': orig[i], 'new': buf[i]} for i in diff]})
     if not a.plan:
+        for path, data in save_originals:       # before a custom picture replaces Apple's for the first time
+            if not os.path.exists(path):
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path + '.tmp', 'wb') as f:
+                    f.write(data)
+                os.replace(path + '.tmp', path)
         with open(a.output, 'wb') as f:
             f.write(buf)
         os.chmod(a.output, 0o444)

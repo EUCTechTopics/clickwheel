@@ -15,14 +15,31 @@ The patches, available on all models, are:
 3. `--producers`: the English menu label **Composers** becomes **Producers** (for people who
    store the producer in the Composer tag).
 
-4. `--logo` (**iPod photo / color and iPod Video**, both **tested on a device**): turns the boot Apple logo upside down. The logo sits in the encrypted `aupd`
-   image. The patch XORs a fixed delta (`scripts/patchdata/photo_logo.xor`, `5g_logo.xor`, from
-   iPodWizard flips that worked on the devices) and only applies when the region's sha256 is exactly
-   stock or exactly flipped; on the Video it also switches aupd's checksum field between the two known
-   values. A build that changes aupd sets aupd's "flashed" flag (photo `0x4230`, Video `0x4258`) to 0,
-   so the iPod copies aupd into its boot ROM at the next start; `--reflash` does only that. Builds
-   reproduce the iPodWizard dumps byte for byte (apart from that flag). The 4G has no such patch:
-   flipping its grey 84×100 picture did not change its boot logo (tested).
+4. `--logo` (**iPod photo / color and iPod Video**, both **tested on a device**): turns the boot
+   Apple logo upside down. The logo sits in the encrypted `aupd` image.
+   - **iPod photo**: the encryption is a position-based XOR stream and the key for the logo area is
+     known (`scripts/patchdata/photo_logo.key`), so the patch decrypts the logo: `original`, `applied`
+     (flipped) or `custom` (any other picture). `--logo-image FILE.bmp` puts the user's own 78×100 BMP
+     on (`keep` keeps the current one). The aupd checksum (`0x4244`) is the byte sum of the decrypted
+     aupd and is adjusted by the change in the pixel sum. Apple's logo is saved to
+     `originals/photo-logo.bin` before it is replaced, so it can be put back. Builds reproduce the
+     iPodWizard flipped and custom dumps byte for byte (apart from the flag below). In the app,
+     Option-click on the logo switch picks the user's own BMP.
+   - **iPod Video**: not a plain XOR, so only flip/unflip, by mapping the exact stock bytes to the
+     exact iPodWizard-flipped bytes (`scripts/patchdata/5g_logo.xor`) and switching the checksum field
+     between the two known values. Another picture there reports `custom`, is left alone by `--exact`,
+     and `--logo` refuses to touch it.
+   A build that changes aupd sets aupd's "flashed" flag (photo `0x4230`, Video `0x4258`) to 0, so the
+   iPod copies aupd into its boot ROM at the next start; `--reflash` does only that. The 4G has no
+   such patch: flipping its grey 84×100 picture did not change its boot logo (tested).
+5. `--dnd FILE.bmp` (**iPod photo / color** and **iPod Video**, neither tested on a device yet): replaces the
+   100×100 RGB565 *Do not disconnect* picture (photo: iPodWizard index 97, osos picture header at partition
+   `0x247A08`; Video: iPodWizard index 372, 28-byte header at partition `0x496918`, same Apple pixels) with
+   the user's BMP (exactly 100×100; 16-bit RGB565/RGB555, 24- or 32-bit). `--dnd keep` keeps the custom
+   picture already on the iPod. Before the first custom picture is written, the build saves Apple's
+   original pixels (checked by sha256) to `originals/photo-dnd.bin` (Video: `5g-dnd.bin`) next to the input (in the app:
+   `~/Library/Application Support/Clickwheel/<serial>/originals/`); switching it off needs that file.
+   In the app, turning the switch on opens a file picker.
 
 The user typically just cloned the repo and says something like "patch my iPod". Walk them
 through the workflow below, one stage at a time. The user may not be technical. Explain each

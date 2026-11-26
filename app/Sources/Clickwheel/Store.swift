@@ -30,6 +30,10 @@ final class AppState {
     var check: PatchReport?
     /// The switches. All off until Clickwheel knows what's on the iPod; then they follow the iPod.
     var selected: Set<PatchID> = []
+    /// Picture files chosen for picture changes (e.g. the "Do not disconnect" picture), not yet on the iPod.
+    var customPictures: [PatchID: URL] = [:]
+    /// Changes switched on with your own picture (Option-click), as opposed to their normal effect.
+    var ownPicture: Set<PatchID> = []
     var plan: PatchReport?
     var built: PatchReport?
     /// The image just written and verified; nil again once the user changes a switch.
@@ -205,7 +209,7 @@ final class AppState {
             let otherIPod = dev != nil && (dev?.serial != lastSerial || dev?.model != lastModel)
             device = dev
             if let dev {
-                if otherIPod && lastSerial != nil { check = nil; plan = nil; built = nil; flashed = nil }
+                if otherIPod && lastSerial != nil { check = nil; plan = nil; built = nil; flashed = nil; customPictures = [:]; ownPicture = [] }
                 lastSerial = dev.serial; lastModel = dev.model
             }
             await refreshFiles()
@@ -317,7 +321,12 @@ final class AppState {
             if c.patchable == true { ok("OK: patchable (osos checksum \(hex32(c.osos!.checksum)) valid)") }
             else { err("Not patchable: this firmware is not the supported build. Nothing will be built.") }
         }
-        if let ds = deviceState { selected = Set(ds.applied.compactMap(PatchID.init(rawValue:))) }
+        if let ds = deviceState {
+            selected = Set(ds.applied.compactMap(PatchID.init(rawValue:)))
+            // your own picture (e.g. a boot logo) is on: the switch shows on, with that picture kept
+            ownPicture = Set(patchIDs.filter { $0.ownPictureOptional(on: model) && ds.patches[$0.rawValue] == "custom" })
+            selected.formUnion(ownPicture)
+        }
         await updatePlan()
     }
 
@@ -357,7 +366,11 @@ final class AppState {
 
     /// patch.py flags for the selection. `--exact`: switches that are off put Apple's original bytes back.
     var selectionFlags: [String] {
-        ["--exact"] + patchIDs.filter { selected.contains($0) }.map(\.flag)
+        ["--exact"] + patchIDs.filter { selected.contains($0) }.flatMap { p -> [String] in
+            guard p.takesPicture || ownPicture.contains(p) else { return [p.flag] }
+            // a newly chosen file, or keep the custom picture that's already on the iPod
+            return [p.pictureFlag, customPictures[p]?.path ?? "keep"]
+        }
     }
 
     // MARK: device steps (macOS's own password dialog; no Terminal, nothing runs as root)
@@ -544,6 +557,7 @@ final class AppState {
             adopt(to, how: "write")
             if let lib = library { knownThisSession.insert(lib.path) }
             if to != p { remove(p) }
+            customPictures = [:]
             check = nil
             await runCheck()
             flashed = current
@@ -639,10 +653,17 @@ final class AppState {
     /// Patch states of the selection, as they would be on the iPod after writing it
     /// (builds use --exact, so a switch that is off means the original bytes).
     var selectionStates: [String: String] {
-        Dictionary(uniqueKeysWithValues: patchIDs.map { ($0.rawValue, selected.contains($0) ? "applied" : "original") })
+        Dictionary(uniqueKeysWithValues: patchIDs.map { p in
+            // a picture another tool put on (state "custom") stays as it is
+            (p.rawValue, selected.contains(p) ? (ownPicture.contains(p) ? "custom" : "applied") : isCustom(p) ? "custom" : "original")
+        })
     }
+    /// The iPod has a picture there that another tool (e.g. iPodWizard) put on: Clickwheel leaves it alone.
+    func isCustom(_ p: PatchID) -> Bool { deviceState?.patches[p.rawValue] == "custom" && !p.ownPictureOptional(on: model) }
+
     var selectionIsInstalled: Bool {
         guard let d = deviceState, !d.patches.isEmpty else { return false }
+        if patchIDs.contains(where: { selected.contains($0) && customPictures[$0] != nil }) { return false }
         return patchIDs.allSatisfy { d.patches[$0.rawValue] == selectionStates[$0.rawValue] }
     }
 
@@ -678,7 +699,8 @@ final class AppState {
     /// What the selection changes compared with the iPod (nil when the iPod's state isn't known).
     var selectionChanges: (add: [PatchID], remove: [PatchID])? {
         guard let d = deviceState, !d.patches.isEmpty else { return nil }
-        return (patchIDs.filter { selected.contains($0) && d.patches[$0.rawValue] != "applied" },
-                patchIDs.filter { !selected.contains($0) && d.patches[$0.rawValue] == "applied" })
+        let want = selectionStates
+        return (patchIDs.filter { selected.contains($0) && (d.patches[$0.rawValue] != want[$0.rawValue] || customPictures[$0] != nil) },
+                patchIDs.filter { !selected.contains($0) && ["applied", "custom"].contains(d.patches[$0.rawValue]) && !isCustom($0) })
     }
 }

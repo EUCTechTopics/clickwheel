@@ -219,9 +219,14 @@ Pictures are stored uncompressed inside `osos`, each with a small header followe
   (10,560 bytes, 31 sectors), nothing else, not even the aupd checksum field (`0x0BC4E5D1`, which is
   not a plain byte sum of the stored data). The XOR of the two versions is row-symmetric for 156-byte
   rows (78 × 2) and 100 rows starting at `0x5DDAB4` (a few bytes earlier also fit, because the edges are
-  equal), so the encryption is a position-based XOR stream: flipping = XOR with the fixed delta
-  `scripts/patchdata/photo_logo.xor`. The checksum presumably covers the decrypted bytes, whose sum a
-  row flip does not change. `patch.py` accepts the region only when its sha256 is exactly the stock or
+  equal), so the encryption is a position-based XOR stream. A third dump, with a custom picture put on
+  with iPodWizard from a known 24-bit BMP, gave the key: iPodWizard converts 24-bit colour as
+  `value * 31 // 255` (red, blue) and `value * 63 // 255` (green); with that, key = ciphertext ^ picture
+  at `0x5DDAB4`, consistent with all three dumps, and the decrypted stock picture is the glossy Apple.
+  The key is `scripts/patchdata/photo_logo.key`. The aupd checksum field (`0x4244`) is the byte sum of
+  the decrypted aupd: the custom picture moved it by exactly the change in the pixel byte sum
+  (−1,155,065), and a row flip leaves it unchanged. `patch.py` only uses the key when the rest of aupd
+  (logo bytes zeroed) has the known sha256. `patch.py` accepts the region only when its sha256 is exactly the stock or
   the flipped version. `write_fd.py` lets a write reach into `aupd` only when a sector there differs
   and refuses any other area.
 - **The aupd "flashed" flag**: writing a changed `aupd` alone does nothing (tested: the partition was
@@ -231,6 +236,13 @@ Pictures are stored uncompressed inside `osos`, each with a small header followe
   boot ROM when it finds 0, then sets 1. `patch.py` resets it whenever a build changes `aupd`, and
   `--reflash` resets it on its own. Tested on a device: with the flag at 0 the iPod flashed
   aupd at the next start and showed the flipped logo.
+- **Custom pictures in osos (`--dnd`)**: iPodWizard's picture index is the 0-based order of the
+  picture headers in osos (index 97 on the photo = the 100×100 *Do not disconnect* sign at partition
+  `0x247A08`, top row first, RGB565 LE). osos pictures are not encrypted, so a custom picture is a plain
+  pixel replacement plus the osos checksum. BMPs are bottom-up unless their height is negative.
+  iPod Video: the same 100×100 picture (same sha256 as the photo's) has a 28-byte header at partition
+  `0x496918` (pixels `0x496934`). iPodWizard calls it index 372, but a raw scan of 5G header-shaped
+  records finds it as the 375th (two extra matches before it), so the offset is pinned, not the index.
 - **iPod Video boot logo (`--5g --logo`)**: iPodWizard picture index 417 (the osos has ~400
   pictures; iPodWizard lists the decrypted aupd pictures after them). aupd: partition `0xC3A400`,
   `0x106400` bytes, encrypted; rsrc lies between osos and aupd, hibe after it (`0xD40C00`). A dump

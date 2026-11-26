@@ -38,8 +38,8 @@ def apply(fd, a, b, limit, src_name, dst_name):
         sys.exit('ABORT: the two images are identical; nothing to write')
     if any(s >= limit for s in diff):
         sys.exit(f'ABORT: images differ beyond 0x{limit:x}; refusing')
-    if len(diff) > 64:
-        sys.exit(f'ABORT: {len(diff)} sectors differ; expected only a handful')
+    if len(diff) > 160:      # menu patches: a few; boot logo: 20-31; a custom picture: 40
+        sys.exit(f'ABORT: {len(diff)} sectors differ; expected at most 160')
 
     cur = read_region(fd, limit)
     dset = set(diff)

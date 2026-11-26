@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
 // The main window: one screen per iPod, like Finder's device page. The iPod and what's on it at the
 // top, the changes as switches with a live preview, and one Apply button. Applying asks for the Mac
@@ -232,24 +234,75 @@ struct ChangeRow: View {
                 .background(on ? Color.accentColor : Color.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
                 Text(patch.plainTitle).font(.headline)
-                Text(patch.plainBlurb).font(.callout).foregroundStyle(.secondary)
+                Text(state.isCustom(patch)
+                     ? "Your iPod has its own picture here, put on with another tool (such as iPodWizard). Clickwheel leaves it as it is."
+                     : patch.plainBlurb)
+                    .font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if on && (patch.takesPicture || state.ownPicture.contains(patch)) {
+                    HStack(spacing: 8) {
+                        Text(state.customPictures[patch].map { "New picture: \($0.lastPathComponent)" } ?? "Your picture is on the iPod.")
+                            .font(.callout).foregroundStyle(.secondary)
+                        Button("Choose Another…") { choose() }.controlSize(.small)
+                    }
+                } else if patch.ownPictureOptional(on: state.model) {
+                    Text("Option-click the switch to use your own \(patch.pictureSize.width)×\(patch.pictureSize.height) BMP instead.")
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
             }
             Spacer(minLength: 8)
             Toggle("", isOn: Binding(
                 get: { on },
                 set: { v in
+                    let option = NSEvent.modifierFlags.contains(.option)
+                    if v && (patch.takesPicture || (option && patch.ownPictureOptional(on: state.model))) {
+                        choose()       // on = a picture was picked; cancelling leaves it off
+                        return
+                    }
                     withAnimation(.snappy(duration: 0.2)) {
                         if v { state.selected.insert(patch) } else { state.selected.remove(patch) }
+                        state.customPictures[patch] = nil
+                        state.ownPicture.remove(patch)
                         state.flashed = nil
                     }
                     state.schedulePlan()
                 }))
                 .toggleStyle(.switch)
                 .labelsHidden()
+                .disabled(state.isCustom(patch))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
+    }
+
+    /// Ask for a BMP of the right size; on success the change is switched on with that file.
+    private func choose() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.bmp]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        let size = patch.pictureSize
+        panel.message = "Choose a \(size.width)×\(size.height) BMP picture"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let (w, h) = bmpSize(url), (w, h) == (size.width, size.height) else {
+            state.alert = AppState.AlertInfo(title: "This picture doesn't fit",
+                                    message: "Choose a BMP of exactly \(size.width)×\(size.height) pixels (16- or 24-bit).")
+            return
+        }
+        withAnimation(.snappy(duration: 0.2)) {
+            state.customPictures[patch] = url
+            if !patch.takesPicture { state.ownPicture.insert(patch) }
+            state.selected.insert(patch)
+            state.flashed = nil
+        }
+        state.schedulePlan()
+    }
+
+    /// Width and height from a BMP header, or nil when it isn't a BMP.
+    private func bmpSize(_ url: URL) -> (Int, Int)? {
+        guard let d = try? Data(contentsOf: url), d.count >= 26, d[0] == 0x42, d[1] == 0x4D else { return nil }
+        func i32(_ o: Int) -> Int32 { d.subdata(in: o..<o + 4).withUnsafeBytes { $0.loadUnaligned(as: Int32.self) } }
+        return (Int(i32(18)), Int(abs(i32(22))))
     }
 }
 

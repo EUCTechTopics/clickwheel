@@ -53,16 +53,30 @@ enum IPodModel: String, CaseIterable, Identifiable, Codable {
 }
 
 enum PatchID: String, CaseIterable, Identifiable {
-    case labels, composers, producers, logo
+    case labels, composers, producers, logo, dnd
     var id: String { rawValue }
-    /// Offered for this model? The boot-logo flip exists for the iPod photo / color and the iPod Video.
-    func available(on model: IPodModel?) -> Bool { self != .logo || model == .photo || model == .g5 }
+    /// Offered for this model? The boot logo and the DnD picture exist for the iPod photo / color and the iPod Video.
+    func available(on model: IPodModel?) -> Bool {
+        switch self {
+        case .logo: return model == .photo || model == .g5
+        case .dnd: return model == .photo || model == .g5
+        default: return true
+        }
+    }
+    /// Turning it on asks for a picture file (a BMP of `pictureSize`).
+    var takesPicture: Bool { self == .dnd }
+    /// Option-click on the switch uses your own picture instead (the boot logo on the iPod photo).
+    func ownPictureOptional(on model: IPodModel?) -> Bool { self == .logo && model == .photo }
+    var pictureSize: (width: Int, height: Int) { self == .logo ? (78, 100) : (100, 100) }
+    /// patch.py option that takes the picture file (or "keep").
+    var pictureFlag: String { self == .logo ? "--logo-image" : flag }
     var title: String {
         switch self {
         case .labels: return "Genres → Labels"
         case .composers: return "Label → Composers"
         case .producers: return "Composers → Producers"
         case .logo: return "Apple logo upside down"
+        case .dnd: return "Own “Do not disconnect” picture"
         }
     }
     var flag: String { "--\(rawValue)" }
@@ -72,6 +86,7 @@ enum PatchID: String, CaseIterable, Identifiable {
         case .composers: return "arrow.triangle.branch"
         case .producers: return "slider.horizontal.3"
         case .logo: return "apple.logo"
+        case .dnd: return "photo"
         }
     }
     /// Plain-language wording for the main window.
@@ -81,6 +96,7 @@ enum PatchID: String, CaseIterable, Identifiable {
         case .composers: return "Open a label to see its composers"
         case .producers: return "Rename Composers to Producers"
         case .logo: return "Flip the Apple logo upside down"
+        case .dnd: return "Use your own “Do not disconnect” picture"
         }
     }
     var plainBlurb: String {
@@ -89,6 +105,7 @@ enum PatchID: String, CaseIterable, Identifiable {
         case .composers: return "Picking a label (or genre) lists its composers, then albums, then songs. Normally it lists artists."
         case .producers: return "For people who keep the producer in the Composer field. The Composers menu is called Producers."
         case .logo: return "The Apple logo shown while the iPod starts up is upside down."
+        case .dnd: return "Shown while the iPod is connected to the Mac. Turn it on to choose a 100×100 BMP picture."
         }
     }
     var shortName: String {
@@ -97,6 +114,7 @@ enum PatchID: String, CaseIterable, Identifiable {
         case .composers: return "Composers per label"
         case .producers: return "Producers"
         case .logo: return "Upside-down logo"
+        case .dnd: return "Own Do not disconnect picture"
         }
     }
     var blurb: String {
@@ -105,6 +123,7 @@ enum PatchID: String, CaseIterable, Identifiable {
         case .composers: return "Picking a label opens its Composers instead of its Artists (1 bytecode operand)."
         case .producers: return "Renames the English Composers menu to Producers (5 strings, same length)."
         case .logo: return "Flips the boot logo in the aupd image (same size); the iPod copies it into its boot ROM at the next start."
+        case .dnd: return "Replaces the 100×100 picture (iPodWizard index 97 on the iPod photo, 372 on the iPod Video) with your BMP; Apple's original is saved first so it can be put back."
         }
     }
 }
