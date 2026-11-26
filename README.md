@@ -8,6 +8,7 @@
 ![platform](https://img.shields.io/badge/host-macOS-black)
 ![claude code](https://img.shields.io/badge/guided%20by-Claude%20Code-d97757)
 ![status](https://img.shields.io/badge/status-working%20on%20device-brightgreen)
+![license](https://img.shields.io/badge/license-MIT-green)
 
 If you use the iPod's *Genre* tag for the **record label**, this makes the menus match:
 
@@ -244,6 +245,12 @@ reject other firmware builds, and a test on a real device.
   confirmed on a device. The 5G port is experimental.
 - Firmware 3.1.1 on the 4th generation only. Porting to other versions means finding the offsets
   again. The notes explain the method.
+
+## License
+
+[MIT](LICENSE) © 2026 Mathijs de Ruiter. This covers the scripts and documentation in this
+repository only, not Apple's firmware, which you dump from your own device and must not
+redistribute.
 
 ## Acknowledgements
 
