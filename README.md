@@ -1,4 +1,4 @@
-# iPodMenu
+# Clickwheel
 
 > Firmware patches for the **iPod 4th generation (click wheel)** that turn the *Genres* menu into a
 > **Labels** browser. Built to be run with **Claude Code**, which guides you step by step.
@@ -62,8 +62,8 @@ firmware version, another model, a corrupt dump) it stops without writing.
 ## Quick start with Claude Code (recommended)
 
 ```sh
-git clone <this-repo-url> iPodMenu
-cd iPodMenu
+git clone https://github.com/EUCTechTopics/clickwheel.git
+cd clickwheel
 claude
 ```
 
