@@ -5,7 +5,7 @@
 > Built to be run with **Claude Code**, which guides you step by step.
 
 ![iPod 4G](https://img.shields.io/badge/iPod%204G-tested%20on%20device-brightgreen)
-![iPod Video 5G](https://img.shields.io/badge/iPod%20Video%205G-experimental-orange)
+![iPod Video 5G](https://img.shields.io/badge/iPod%20Video%205G-tested%20on%20device-brightgreen)
 ![platform](https://img.shields.io/badge/host-macOS-black)
 ![claude code](https://img.shields.io/badge/guided%20by-Claude%20Code-d97757)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -47,7 +47,7 @@ The image checksum is recalculated in every case.
 
 | | iPod 4th generation | iPod Video (5th generation) |
 |---|---|---|
-| Status | **Tested on a device** | **Experimental**: patches built and checked, not yet confirmed on a device |
+| Status | **Tested on a device** | **Tested on a device** |
 | Identify | `BoardHwName: iPod Q21` (tested: M9282) | 64 MiB `Apple_MDFW` firmware partition |
 | Firmware | Apple **3.1.1** | The build whose `osos` image is `0x735A00` bytes (checked by `--check`) |
 | Patch flag | (default) | `--5g` |
@@ -172,7 +172,7 @@ Labels string lowers it by `0x11` and each Producers string by `0x4`:
 
 ### iPod Video (5th gen): `--5g`
 
-Experimental port of all three patches, for the 5G build whose `osos` image is `0x735A00` bytes
+All three patches, for the 5G build whose `osos` image is `0x735A00` bytes
 (64 MiB partition, checksum `0x2C7C48F3` stock). Offsets are into the 64 MiB partition:
 
 | Patch | Offset | Old | New |
@@ -238,8 +238,7 @@ A Finder/iTunes **firmware update or restore** removes the patches. Just run the
 resources. This project aims for a smaller, safer take on that idea for macOS: verified backups,
 content-checked patches, and Claude Code as the guide.
 
-- [x] Verified backup / write / rollback for the 4G and the iPod Video (5G, experimental)
-- [ ] Confirm the 5G patches on a device
+- [x] Verified backup / write / rollback for the 4G and the iPod Video (5G), both tested on a device
 - [x] Menu renames: Genres → Labels, Composers → Producers
 - [x] Browse-order change: Label → Composers
 - [x] `patch.py --find TEXT`: read-only string search showing how many bytes each slot allows
@@ -261,8 +260,7 @@ reject other firmware builds, and a test on a real device.
   "what plays next" haven't been specifically tested yet.
 - `--producers` only renames menu text; it uses the same mechanism as `--labels`, which is
   confirmed on a device.
-- The **5G port is experimental**. Its offsets were found statically on one 5G firmware build and
-  haven't been confirmed on a device yet. Other 5G builds are rejected by `--check`.
+- The 5G offsets were found on one 5G firmware build. Other 5G builds are rejected by `--check`.
 - One firmware build per model: 3.1.1 on the 4G and one 5G build. Porting to other versions
   means finding the offsets again. The notes explain the method.
 

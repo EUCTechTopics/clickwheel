@@ -3,9 +3,7 @@
 This repo patches the Apple firmware of click-wheel iPods. It supports two models:
 
 - **iPod 4th generation** (click wheel, "iPod Q21") with firmware 3.1.1: **tested on a device**.
-- **iPod Video (5th generation)**, one firmware build (`osos` 0x735A00 bytes): **experimental**.
-  The patches are built and checked but not yet confirmed on a device. Say so before the user
-  writes anything to a 5G.
+- **iPod Video (5th generation)**, one firmware build (`osos` 0x735A00 bytes): **tested on a device**.
 
 The patches, available on both models, are:
 
@@ -117,8 +115,6 @@ Tell the user to:
 ### iPod Video (5th gen)
 Same workflow and the same rules, with these differences:
 
-- **Tell the user up front that the 5G port is experimental:** built and checked against one
-  firmware build, not yet confirmed on a device. Make sure they've read the recovery steps.
 - The scripts take the partition explicitly (no auto-detect), so confirm it first.
 - Back up: `! sudo scripts/backup_fw_5g.sh diskNs2` → `firmware/ipod5g_fw_backup.bin`.
 - Check / build: `python3 scripts/patch.py --5g --check`, then
@@ -126,8 +122,7 @@ Same workflow and the same rules, with these differences:
 - Write: `! sudo scripts/write_fw_5g.sh diskNs2`. It writes only the 512-byte sectors that differ
   (the partition also holds a hibernation image, which must be left alone).
 - Undo: `! sudo scripts/rollback_fw_5g.sh diskNs2`.
-- Reboot and test as for the 4G. If it works, ask the user whether they want the README's
-  "experimental" status updated.
+- Reboot and test as for the 4G.
 
 ## Repository map
 
@@ -139,7 +134,7 @@ Same workflow and the same rules, with these differences:
 | `scripts/patch.py` | Builds patched copies; `--check` to inspect. Content-based safety checks. |
 | `scripts/write_fw.sh` | sudo: writes an image (checks its `.sha256`, partition type and size), reads it back |
 | `scripts/rollback_fw.sh` | sudo: writes the original backup back |
-| `scripts/backup_fw_5g.sh`, `write_fw_5g.sh`, `rollback_fw_5g.sh` | sudo, iPod Video 5G (experimental `--5g` port): backup; write/undo only the differing sectors (leaves the hibernation image alone) via `write_sectors.py` |
+| `scripts/backup_fw_5g.sh`, `write_fw_5g.sh`, `rollback_fw_5g.sh` | sudo, iPod Video 5G (`--5g`): backup; write/undo only the differing sectors (leaves the hibernation image alone) via `write_sectors.py` |
 | `firmware/` | Firmware dumps and outputs. Git-ignored: contains Apple's firmware, never commit it. |
 | `docs/REVERSE_ENGINEERING.md` | How the patches were found; offsets and structures for extending them |
 
