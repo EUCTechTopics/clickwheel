@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(scripts/ipod_info.sh:*)",
+      "Bash(scripts/find_ipod.sh:*)",
+      "Bash(python3 scripts/patch.py --check:*)",
+      "Bash(diskutil list:*)",
+      "Bash(diskutil info:*)"
+    ],
+    "deny": [
+      "Bash(sudo:*)",
+      "Bash(dd:*)",
+      "Bash(diskutil eraseDisk:*)",
+      "Bash(diskutil partitionDisk:*)",
+      "Bash(rm firmware/ipod_fw_backup.bin:*)"
+    ]
+  }
+}

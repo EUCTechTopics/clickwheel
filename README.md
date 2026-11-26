@@ -1,0 +1,254 @@
+# iPodMenu
+
+> Firmware patches for the **iPod 4th generation (click wheel)** that turn the *Genres* menu into a
+> **Labels** browser. Built to be run with **Claude Code**, which guides you step by step.
+
+![device](https://img.shields.io/badge/device-iPod%204G%20(Q21)-lightgrey)
+![firmware](https://img.shields.io/badge/firmware-3.1.1-blue)
+![platform](https://img.shields.io/badge/host-macOS-black)
+![claude code](https://img.shields.io/badge/guided%20by-Claude%20Code-d97757)
+![status](https://img.shields.io/badge/status-working%20on%20device-brightgreen)
+
+If you use the iPod's *Genre* tag for the **record label**, this makes the menus match:
+
+| | Stock firmware | Patched |
+|---|---|---|
+| Menu name | Music → **Genres** | Music → **Labels** |
+| After picking an entry | Genre → **Artists** → Albums → Songs | Label → **Composers** → Albums → Songs |
+| Composers menu (optional) | Music → **Composers** | Music → **Producers** |
+
+The Composers step pairs well with writing only the *main* artist into the **Composer** tag. That
+keeps a label's list clean even when tracks credit several artists. If you use that tag for the
+**producer** instead, `--producers` renames the menu to match, so the path reads
+Label → Producers → Albums → Songs.
+
+All patches are tiny in-place byte changes, and you can pick any combination:
+
+| Flag | What it does | Size |
+|---|---|---|
+| `--labels` | *Genres* → *Labels* (English menus) | 5 strings |
+| `--composers` | Picking a label shows Composers instead of Artists | 1 byte |
+| `--producers` | *Composers* → *Producers* (English menus) | 5 strings |
+
+The image checksum is recalculated in every case.
+
+---
+
+## ⚠️ Read this first
+
+- This writes to your iPod's **firmware partition**. Every step makes or checks a verified backup
+  first, and the original can be written back at any time. You still use it **at your own risk**.
+- This repo contains **no Apple firmware**. Everything is dumped from *your* iPod into `firmware/`,
+  which is git-ignored. Don't commit or share those files.
+- Read [Recovery](#recovery) before you write anything.
+
+## Compatibility
+
+| | Supported |
+|---|---|
+| Device | iPod 4th generation, click wheel: `BoardHwName: iPod Q21` (tested: M9282) |
+| Firmware | Apple **3.1.1** |
+| Format | **Mac-formatted** iPod (has an `Apple_MDFW` firmware partition). Windows-formatted iPods aren't supported. |
+| Storage mods | Works with iFlash (tested) |
+| Host | macOS with `zsh` and Python 3 (standard library only) |
+| Menu language | **English**. Other languages are left as they are. |
+
+The patcher checks the firmware's **content**: structure, image size, checksum, and the exact
+original bytes plus surrounding context at every patch location. On anything else (another
+firmware version, another model, a corrupt dump) it stops without writing.
+
+---
+
+## Quick start with Claude Code (recommended)
+
+```sh
+git clone <this-repo-url> iPodMenu
+cd iPodMenu
+claude
+```
+
+Then type:
+
+```
+/patch-ipod
+```
+
+(or just say *"patch my iPod"*). Claude Code reads [`CLAUDE.md`](CLAUDE.md) and walks you through:
+
+1. **Identify:** finds the iPod and checks the model and firmware (read-only).
+2. **Back up:** *you* run `! sudo scripts/backup_fw.sh`. Claude never handles your password.
+3. **Check and plan:** shows exactly which bytes will change and waits for your "yes".
+4. **Build:** creates a patched **copy** and checks that only the planned bytes changed.
+5. **Write:** *you* run `! sudo scripts/write_fw.sh firmware/ipod_fw_patched.bin`.
+6. **Reboot and test:** explains how to restart the iPod and what to check.
+
+The project's `.claude/settings.json` blocks Claude from running `sudo`, `dd` or disk-erasing
+commands itself. The steps that change your device are always yours to run.
+
+## Manual usage
+
+```sh
+scripts/ipod_info.sh                                   # 1. identify (read-only)
+sudo scripts/backup_fw.sh                              # 2. backup -> firmware/ipod_fw_backup.bin
+python3 scripts/patch.py --check                       # 3. inspect: every patch should say "original"
+python3 scripts/patch.py --labels --composers          # 4. build firmware/ipod_fw_patched.bin (add --producers if wanted)
+sudo scripts/write_fw.sh firmware/ipod_fw_patched.bin  # 5. write + read back and compare
+diskutil eject diskN                                   # 6. unplug, hold Menu + Select to reboot
+```
+
+All scripts auto-detect the iPod's firmware partition. If more than one iPod is connected, pass
+the partition explicitly, e.g. `sudo scripts/write_fw.sh firmware/ipod_fw_patched.bin disk6s2`.
+
+---
+
+## What the patches change
+
+Offsets are into the 32 MiB `Apple_MDFW` partition. The `osos` image (the main OS) starts at `0x4600`.
+
+### `--labels`: rename *Genres* → *Labels*
+
+`47 65 6E 72 65 73` ("Genres") → `4C 61 62 65 6C 73` ("Labels") at:
+
+| Offset | Where it shows up |
+|---|---|
+| `0x1B7C3C` | Music menu item |
+| `0x1B8248` | "All Genres" → "All Labels" |
+| `0x1B95F2` | Main-menu settings checklist |
+| `0x1B9788` | Main-menu item list |
+| `0x1B9B4C` | Shuffle / settings list |
+
+### `--composers`: *Labels* → **Composers**
+
+| Offset | Old | New | Meaning |
+|---|---|---|---|
+| `0x1BF558` | `3B` | `23` | The genre handler calls *open Composers* (`0x823`) instead of *open Artists* (`0x83B`) |
+
+### `--producers`: rename *Composers* → *Producers*
+
+`Composers` → `Producers` (same length) at:
+
+| Offset | Where it shows up |
+|---|---|
+| `0x1B7C44` | Music menu item |
+| `0x1B822C` | "All Composers" → "All Producers" |
+| `0x1B95E6` | Main-menu settings checklist |
+| `0x1B977C` | Main-menu item list |
+| `0x1B9B70` | Shuffle / settings list |
+
+### Checksum
+
+The `osos` checksum (32-bit sum of the image bytes) at **`0x421C`** is recalculated. Each
+Labels string lowers it by `0x11` and each Producers string by `0x4`:
+
+| Image | `osos` checksum |
+|---|---|
+| Stock 3.1.1 | `0x1259EF03` |
+| `--labels` | `0x1259EEAE` |
+| `--composers` | `0x1259EEEB` |
+| `--labels --composers` | `0x1259EE96` |
+| `--labels --composers --producers` | `0x1259EE82` |
+
+### iPod Video (5th gen): `--5g`
+
+Experimental port, same two patches, for the 5G build whose `osos` image is `0x735A00` bytes
+(64 MiB partition, checksum `0x2C7C48F3` stock). Offsets are into the 64 MiB partition:
+
+| Patch | Offset | Old | New |
+|---|---|---|---|
+| `--labels` | `0x4B5A04`, `0x4B6760`, `0x4B7FB6`, `0x4B8158`, `0x4B8818` | `Genres` | `Labels` |
+| `--composers` | `0x4BEEFA` | `69` | `4C` (genre handler #248 calls *open Composers* `0x104C` instead of *open Artists* `0x1069`) |
+| `--producers` | `0x4B5A0C`, `0x4B6744`, `0x4B7FA6`, `0x4B814C`, `0x4B884C` | `Composers` | `Producers` |
+
+Checksum with `--labels --composers`: `0x2C7C4881`. With all three: `0x2C7C486D` (at `0x421C`). The 5G partition also holds a
+hibernation image, so 5G images are written with `write_fw_5g.sh`, which writes only the 512-byte
+sectors that differ (all inside `osos`) and leaves the rest alone. Workflow:
+
+```
+sudo scripts/backup_fw_5g.sh diskNs2
+python3 scripts/patch.py --5g --check
+python3 scripts/patch.py --5g --labels --composers
+sudo scripts/write_fw_5g.sh diskNs2          # undo: sudo scripts/rollback_fw_5g.sh diskNs2
+```
+
+## How it works
+
+The 3.1.1 UI is partly written as **bytecode for a small JavaScript-style VM** inside the
+firmware. Each browse category has its own small script handlers. When you pick a genre, the
+handler records the selection and then calls a global "open Artists list" function. Patch 2
+points that call at the "open Composers list" function instead. The composer list is built with
+the same library query as the artist list, and picking a composer keeps the genre selected, so
+you only see the label's composers.
+
+The full notes (memory map, native method binding, category numbers, script function table)
+are in [`docs/REVERSE_ENGINEERING.md`](docs/REVERSE_ENGINEERING.md).
+
+---
+
+## Recovery
+
+| Situation | What to do |
+|---|---|
+| Undo everything | `sudo scripts/rollback_fw.sh` writes your original backup back |
+| Different set of patches | Build the set you want (with `-o` for a new file name) and write it |
+| iPod doesn't boot (Apple logo, folder icon, reboot loop) | **Disk mode:** hold *Menu + Select* to reset. As soon as the Apple logo appears, switch to holding *Select + Play* until "Do not disconnect" appears. Connect it and run the rollback. |
+| Nothing else works | Restore in Finder/iTunes. This reinstalls stock firmware but **erases the music**. iFlash-modded iPods sometimes need extra steps; check iFlash's documentation. |
+
+A Finder/iTunes **firmware update or restore** removes the patches. Just run the workflow again.
+
+## Repository layout
+
+```
+.
+├── CLAUDE.md                 # step-by-step workflow and safety rules for Claude Code
+├── .claude/
+│   ├── commands/patch-ipod.md  # the /patch-ipod command
+│   └── settings.json           # allows read-only checks, blocks sudo/dd for Claude
+├── scripts/
+│   ├── ipod_info.sh          # read-only: disks, firmware partition, model/firmware
+│   ├── find_ipod.sh          # read-only: locate/validate the Apple_MDFW partition
+│   ├── backup_fw.sh          # sudo: dump the partition (read twice and compare)
+│   ├── patch.py              # build patched copies; --check to inspect
+│   ├── write_fw.sh           # sudo: write an image, read it back and compare
+│   └── rollback_fw.sh        # sudo: write the original backup back
+├── docs/REVERSE_ENGINEERING.md
+└── firmware/                 # your dumps and outputs (git-ignored)
+```
+
+## Roadmap: a light, modern iPodWizard for Mac
+
+[iPodWizard](https://en.wikipedia.org/wiki/IPodWizard) let Windows users edit iPod firmware
+resources. This project aims for a smaller, safer take on that idea for macOS: verified backups,
+content-checked patches, and Claude Code as the guide.
+
+- [x] Verified backup / write / rollback for the 4G (and an experimental 5G port)
+- [x] Menu renames: Genres → Labels, Composers → Producers
+- [x] Browse-order change: Label → Composers
+- [x] `patch.py --find TEXT`: read-only string search showing how many bytes each slot allows
+- [ ] **Custom renames:** `--rename OLD=NEW` for any English menu string that fits its slot,
+      with the same content checks
+- [ ] Patch catalogue as data (one file per model/firmware) instead of code
+- [ ] Other languages
+- [ ] More browse orders (e.g. Label → Albums)
+- [ ] Read-only viewer for firmware resources (strings, then images and fonts)
+
+Contributions are welcome. Every new patch needs exact original bytes plus enough context to
+reject other firmware builds, and a test on a real device.
+
+## Limitations
+
+- English menus only. Other languages still say "Genres" (and "Composers").
+- The Label → Composer path never existed in Apple's firmware. The main path (label → its
+  composers → albums → songs) is confirmed on a device. "All" entries, screen titles and
+  "what plays next" haven't been specifically tested yet.
+- `--producers` only renames menu text; it uses the same mechanism as `--labels`, which is
+  confirmed on a device. The 5G port is experimental.
+- Firmware 3.1.1 on the 4th generation only. Porting to other versions means finding the offsets
+  again. The notes explain the method.
+
+## Acknowledgements
+
+The image-directory layout (`]ih[` header, 40-byte entries) follows community documentation
+from the iPodLinux and Rockbox projects. Disassembly was done with
+[Capstone](https://www.capstone-engine.org/).
+
+*Not affiliated with or endorsed by Apple. iPod is a trademark of Apple Inc.*

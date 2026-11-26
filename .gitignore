@@ -1,0 +1,11 @@
+# Firmware dumps and patched images contain Apple's firmware - never commit them.
+firmware/*
+!firmware/.gitkeep
+*.bin
+*.bin.sha256
+
+# local Claude Code settings
+.claude/settings.local.json
+
+.DS_Store
+__pycache__/
