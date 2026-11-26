@@ -122,22 +122,78 @@ struct TestChecklist: View {
     }
 }
 
-/// One-line "what's on this iPod" summary, remembered per iPod.
-struct InstalledBadge: View {
+/// What's on the connected iPod: per patch installed / not installed, with where that knowledge
+/// comes from, and a read-only "Read from iPod" check.
+struct DeviceStateCard: View {
     @Environment(AppState.self) private var state
+    var compact = false
+
     var body: some View {
-        if let i = state.installed {
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark.seal.fill").foregroundStyle(Theme.phosphor)
-                Text("On this iPod: ").foregroundStyle(.secondary)
-                + Text(i.patches.joined(separator: " + ")).bold()
-                Spacer()
-                Text("written \(i.date.formatted(date: .abbreviated, time: .shortened))").font(Theme.monoTiny).foregroundStyle(.tertiary)
+        Card(title: "On this iPod", symbol: "ipod") {
+            if let ds = state.deviceState, !ds.patches.isEmpty {
+                if compact {
+                    HStack(spacing: 8) {
+                        ForEach(PatchID.allCases) { p in chip(p, ds.patches[p.rawValue]) }
+                        Spacer()
+                    }
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(PatchID.allCases) { p in
+                            HStack(spacing: 10) {
+                                Image(systemName: p.symbol).foregroundStyle(.secondary).frame(width: 22)
+                                Text(p.title)
+                                Spacer()
+                                chip(p, ds.patches[p.rawValue])
+                            }
+                        }
+                    }
+                }
+                footer(ds)
+            } else if let ds = state.deviceState, let img = ds.image {
+                Text("Last written by Clickwheel: **\(URL(fileURLWithPath: img).lastPathComponent)**. Not verified on the iPod yet.")
+                    .foregroundStyle(.secondary)
+                footer(ds)
+            } else {
+                Text("Not known yet. Clickwheel learns it from the backup, every write and rollback, or by reading the iPod.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                footer(nil)
             }
-            .font(.callout)
-            .padding(10)
-            .background(Theme.phosphor.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.phosphor.opacity(0.25), lineWidth: 0.5))
+        }
+    }
+
+    private func chip(_ p: PatchID, _ s: String?) -> some View {
+        let (text, color): (String, Color) = switch s {
+        case "applied": (compact ? p.rawValue : "installed", Theme.phosphor)
+        case "original": (compact ? p.rawValue : "not installed", .secondary)
+        case "mismatch": (compact ? p.rawValue : "unknown bytes", .red)
+        default: (compact ? p.rawValue : "unknown", .secondary)
+        }
+        return HStack(spacing: 4) {
+            if compact { Image(systemName: s == "applied" ? "checkmark" : "minus").font(.system(size: 8, weight: .bold)) }
+            Text(text.uppercased())
+        }
+        .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+        .tracking(0.6)
+        .padding(.horizontal, 7).padding(.vertical, 3)
+        .foregroundStyle(color)
+        .background(color.opacity(s == "applied" ? 0.16 : 0.08), in: Capsule())
+        .overlay(Capsule().strokeBorder(color.opacity(0.35), lineWidth: 0.5))
+    }
+
+    private func footer(_ ds: AppState.DeviceState?) -> some View {
+        HStack(spacing: 8) {
+            if let ds {
+                Image(systemName: ds.source == .remembered ? "questionmark.circle" : "checkmark.shield")
+                    .foregroundStyle(ds.source == .remembered ? Theme.amber : Theme.phosphor)
+                Text("\(ds.sourceText) · \(ds.date.formatted(date: .abbreviated, time: .shortened))")
+                    .font(Theme.monoTiny).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Read from iPod…", systemImage: "arrow.down.doc.fill") { Task { await state.readDeviceState() } }
+                .controlSize(.small)
+                .disabled(state.busy != nil || state.device == nil)
+                .help("Read-only: reads the firmware partition (password in Terminal) and checks every patch location")
         }
     }
 }

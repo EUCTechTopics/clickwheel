@@ -183,6 +183,8 @@ final class AppState {
     // MARK: device detection (read-only: diskutil and SysInfo)
 
     private var scanning = false
+    /// False until the first diskutil scan has finished (so the UI doesn't flash "no iPod").
+    var scannedOnce = false
     private var lastSerial: String?
     private var lastModel: IPodModel?
 
@@ -210,6 +212,7 @@ final class AppState {
             if !quiet { err("diskutil list failed: \(r.stderr)") }
             return
         }
+        defer { scannedOnce = true }
         var found: [Device] = []
         for d in disks {
             guard let disk = d["DeviceIdentifier"] as? String, let parts = d["Partitions"] as? [[String: Any]] else { continue }
@@ -304,6 +307,10 @@ final class AppState {
             for (n, p) in (c.patches ?? [:]).sorted(by: { $0.key < $1.key }) { out("patch \(n): \(p.state)") }
             if c.patchable == true { ok("OK: patchable (osos checksum \(hex32(c.osos!.checksum)) valid)") }
             else { err("Not patchable: this firmware is not the supported build. Nothing will be built.") }
+        }
+        if !seededSelection, let ds = deviceState, !ds.applied.isEmpty {
+            selected = Set(ds.applied.compactMap(PatchID.init(rawValue:)))
+            seededSelection = true
         }
         await updatePlan()
     }
@@ -411,6 +418,9 @@ final class AppState {
             ok("backup verified; this is your way back")
             await refreshFiles()
             backupConfirmed = true
+            if let b = backup, check != nil {
+                setDeviceState(DeviceState(patches: backupStates, image: b.url.path, source: .backup, date: Date()))
+            }
             if check?.patchable == true { advance(to: .patches) }
         } else {
             alert = AlertInfo(title: "Backup did not complete", message: "The backup script did not report “OK: backup verified”. Nothing was written to the iPod.\n\nLast output:\n" + r.combined.split(separator: "\n").suffix(3).joined(separator: "\n"))
@@ -419,65 +429,151 @@ final class AppState {
 
     func runFlash() async {
         guard let model, let d = device, let img = built?.output else { return }
-        guard let r = await privileged("Writing firmware", model.writeCommand(part: d.partition, image: img)) else { return }
+        let from = await currentImage()
+        if let from { info("on the iPod now: \(URL(fileURLWithPath: from).lastPathComponent)") }
+        guard let r = await privileged("Writing firmware", model.writeCommand(part: d.partition, image: img, from: from)) else { return }
         if r.stdout.contains("OK: firmware partition now matches") {
             flashed = URL(fileURLWithPath: img)
-            UserDefaults.standard.set(img, forKey: "flashed.\(model.rawValue)")
             flashFailed = false
-            if let s = d.serial { setInstalled(Installed(patches: built?.applied ?? [], image: URL(fileURLWithPath: img).lastPathComponent, date: Date()), serial: s) }
+            var states = backupStates
+            for p in built?.applied ?? [] { states[p] = "applied" }
+            setDeviceState(DeviceState(patches: states, image: img, source: .write, date: Date()))
             ok("firmware written and verified")
         } else {
             flashFailed = true
             let mismatch = r.combined.contains("MISMATCH") || r.combined.contains("WRITE FAILED")
+            let unknown = r.combined.contains("matches neither image") || r.combined.contains("device differs from")
             alert = AlertInfo(title: mismatch ? "Do not unplug the iPod" : "Write did not complete",
                               message: mismatch
                                 ? "The read-back did not match. Leave the iPod connected and use Restore ▸ Roll back to write your backup back."
+                                : unknown
+                                ? "The iPod holds different firmware than Clickwheel expected, so the script stopped before writing. Use Device ▸ Read from iPod to see what's on it, then try again."
                                 : "The write script stopped before writing (see the console). The iPod was not changed.",
                               critical: mismatch)
         }
     }
 
-    /// The image currently on the device, as far as this app knows (needed by the 5G/photo rollback).
-    var lastFlashed: String? {
-        guard let model else { return nil }
-        if let f = flashed { return f.path }
-        if let s = UserDefaults.standard.string(forKey: "flashed.\(model.rawValue)"), FileManager.default.fileExists(atPath: s) { return s }
-        return firmwareDir?.appendingPathComponent(model.patchedFile).path
-    }
-
     func runRollback() async {
-        guard let model, let d = device, backup?.verified == true else { return }
-        let img = lastFlashed ?? ""
-        guard let r = await privileged("Rolling back", model.rollbackCommand(part: d.partition, image: img)) else { return }
+        guard let model, let d = device, let b = backup, b.verified else { return }
+        let from = await currentImage()
+        if from == b.url.path {
+            alert = AlertInfo(title: "Already original", message: "As far as Clickwheel knows, this iPod already runs the firmware from your backup. Use Read from iPod to double-check.")
+            return
+        }
+        guard let r = await privileged("Rolling back", model.rollbackCommand(part: d.partition, image: from ?? "")) else { return }
         if r.stdout.contains("OK: firmware partition now matches") {
             flashed = nil
-            UserDefaults.standard.removeObject(forKey: "flashed.\(model.rawValue)")
-            if let s = d.serial { setInstalled(nil, serial: s) }
+            setDeviceState(DeviceState(patches: backupStates, image: b.url.path, source: .rollback, date: Date()))
             ok("original firmware restored")
         } else {
-            alert = AlertInfo(title: "Rollback did not complete", message: "See the console. If the iPod doesn't boot, put it in disk mode and try again, or restore it in Finder.", critical: true)
+            alert = AlertInfo(title: "Rollback did not complete", message: "See the console. If the iPod holds firmware Clickwheel doesn't know, use Read from iPod first. If it doesn't boot, put it in disk mode and try again, or restore it in Finder.", critical: true)
         }
     }
 
-    // MARK: what's installed (remembered per iPod serial; the app can't read the partition itself)
+    /// Read-only: ask the iPod what's on it (sudo in Terminal: dd + patch.py --check).
+    func readDeviceState() async {
+        guard let model, let d = device else { return }
+        guard let r = await privileged("Reading patches from the iPod", model.stateCommand(part: d.partition)) else { return }
+        guard let line = r.stdout.split(separator: "\n").last(where: { $0.hasPrefix("{") }),
+              let rep = try? JSONDecoder().decode(PatchReport.self, from: Data(line.utf8)), rep.ok, let p = rep.patches else {
+            alert = AlertInfo(title: "Couldn't read the iPod", message: "The read-only check didn't produce a report. See the console. Nothing was written.")
+            return
+        }
+        let states = p.mapValues(\.state)
+        let img = await imageMatching(states)
+        setDeviceState(DeviceState(patches: states, image: img, source: .read, date: Date()))
+        let applied = PatchID.allCases.filter { states[$0.rawValue] == "applied" }.map(\.rawValue)
+        ok("on the iPod: " + (applied.isEmpty ? "stock firmware (no patches)" : applied.joined(separator: " + ")))
+        if states.values.contains("mismatch") { err("some patch locations hold unexpected bytes: not the supported firmware build") }
+        if let img { info("matches \(URL(fileURLWithPath: img).lastPathComponent)") }
+    }
 
-    struct Installed: Codable, Equatable {
-        var patches: [String]
-        var image: String
+    // MARK: what's on the iPod (remembered per iPod; exact after a backup, write, rollback or read)
+
+    struct DeviceState: Codable, Equatable {
+        enum Source: String, Codable { case backup, write, rollback, read, remembered }
+        var patches: [String: String]     // patch -> original | applied | mismatch
+        var image: String?                // a local image identical to the iPod's firmware, if known
+        var source: Source
         var date: Date
+
+        var applied: [String] { PatchID.allCases.map(\.rawValue).filter { patches[$0] == "applied" } }
+        var isStock: Bool { PatchID.allCases.allSatisfy { patches[$0.rawValue] == "original" } }
+        var sourceText: String {
+            switch source {
+            case .backup: return "from the backup"
+            case .write: return "verified by read-back after writing"
+            case .rollback: return "verified by read-back after the rollback"
+            case .read: return "read from the iPod"
+            case .remembered: return "remembered, not verified"
+            }
+        }
     }
 
-    var installed: Installed? {
-        guard let s = device?.serial, let d = UserDefaults.standard.data(forKey: "installed.\(s)") else { return nil }
-        _ = installedVersion
-        return try? JSONDecoder().decode(Installed.self, from: d)
+    private var stateKey: String? {
+        guard let d = device, let m = d.model else { return nil }
+        return "deviceState.\(d.serial ?? "model-" + m.rawValue)"
     }
-    private var installedVersion = 0
+    private var stateVersion = 0
+    private var seededSelection = false
 
-    private func setInstalled(_ i: Installed?, serial: String) {
-        if let i, let d = try? JSONEncoder().encode(i) { UserDefaults.standard.set(d, forKey: "installed.\(serial)") }
-        else { UserDefaults.standard.removeObject(forKey: "installed.\(serial)") }
-        installedVersion += 1
+    var deviceState: DeviceState? {
+        _ = stateVersion
+        guard let k = stateKey else { return nil }
+        if let data = UserDefaults.standard.data(forKey: k), let s = try? JSONDecoder().decode(DeviceState.self, from: data) { return s }
+        // Older Clickwheel versions only remembered the last image written for this model.
+        if let m = model, let p = UserDefaults.standard.string(forKey: "flashed.\(m.rawValue)"), FileManager.default.fileExists(atPath: p) {
+            return DeviceState(patches: [:], image: p, source: .remembered,
+                               date: (try? FileManager.default.attributesOfItem(atPath: p)[.modificationDate] as? Date) ?? .distantPast)
+        }
+        return nil
+    }
+
+    func setDeviceState(_ s: DeviceState) {
+        guard let k = stateKey, let data = try? JSONEncoder().encode(s) else { return }
+        UserDefaults.standard.set(data, forKey: k)
+        stateVersion += 1
+        // The toggles start from what's on the iPod.
+        if !s.applied.isEmpty { selected = Set(s.applied.compactMap(PatchID.init(rawValue:))) }
+        schedulePlan()
+    }
+
+    var backupStates: [String: String] { (check?.patches ?? [:]).mapValues(\.state) }
+
+    /// Patch states of the selection, as they would be on the iPod after writing it.
+    var selectionStates: [String: String] {
+        var st = backupStates
+        for p in selected { st[p.rawValue] = "applied" }
+        return st
+    }
+    var selectionIsInstalled: Bool {
+        guard let d = deviceState, !d.patches.isEmpty else { return false }
+        return PatchID.allCases.allSatisfy { d.patches[$0.rawValue] == selectionStates[$0.rawValue] }
+    }
+
+    /// The local image that equals the firmware on the iPod, if Clickwheel can tell.
+    func currentImage() async -> String? {
+        if let s = deviceState {
+            if let i = s.image, FileManager.default.fileExists(atPath: i) { return i }
+            if !s.patches.isEmpty { return await imageMatching(s.patches) }
+        }
+        return backup?.url.path
+    }
+
+    /// Find an image in firmware/ (the backup or a patched copy built from it) with these patch states.
+    func imageMatching(_ states: [String: String]) async -> String? {
+        guard let model, let dir = firmwareDir, let b = backup else { return nil }
+        if PatchID.allCases.allSatisfy({ states[$0.rawValue] == backupStates[$0.rawValue] }) { return b.url.path }
+        let stem = model.patchedFile.replacingOccurrences(of: ".bin", with: "")
+        let files = ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
+            .filter { $0.hasPrefix(stem) && $0.hasSuffix(".bin") }.sorted().reversed()
+        for f in files {
+            let path = dir.appendingPathComponent(f).path
+            let r = await Runner.run("/usr/bin/env", ["python3", "-I", "scripts/patch.py", "--model", model.rawValue, "-i", path, "--check", "--json"], cwd: repo)
+            guard let rep = try? JSONDecoder().decode(PatchReport.self, from: Data(r.stdout.utf8)), let p = rep.patches else { continue }
+            if PatchID.allCases.allSatisfy({ p[$0.rawValue]?.state == states[$0.rawValue] }) { return path }
+        }
+        return nil
     }
 
     // MARK: status

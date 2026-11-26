@@ -27,7 +27,7 @@ struct IPodPreview: View {
             ? ["All", "Aphex Twin", "Boards of Canada", "Squarepusher", "Plaid"]
             : ["All", "Aphex Twin", "Boards of Canada", "Squarepusher feat. …", "Plaid & Mira Calix"]
         return [
-            Screen(title: "Music", items: ["Playlists", "Artists", "Albums", "Songs", genre, composer, "Audiobooks"], sel: 4),
+            Screen(title: "Music", items: ["Playlists", "Artists", "Albums", "Songs", genre, composer], sel: 4),
             Screen(title: genre, items: ["All", "Blue Note", "ECM", "Warp", "XL Recordings"], sel: 3),
             Screen(title: "Warp", items: second, sel: 2),
             Screen(title: "Boards of Canada", items: ["All", "Geogaddi", "Music Has the Right…", "Tomorrow's Harvest"], sel: 1),
@@ -60,7 +60,7 @@ struct IPodPreview: View {
                 .font(.system(size: 9.5, design: .monospaced))
                 .foregroundStyle(.tertiary)
         }
-        .task(id: patched) {
+        .task(id: "\(patched)|\(patches.map(\.rawValue).sorted())") {
             screen = 0
             selection = [:]
             while !Task.isCancelled {
@@ -227,19 +227,28 @@ struct IPodPreview: View {
 /// The right-hand inspector: preview + a stock/patched switch + the model "label plate".
 struct PreviewPanel: View {
     @Environment(AppState.self) private var state
-    @State private var showPatched = true
+    enum Mode: Hashable { case stock, device, selection }
+    @State private var mode: Mode = .selection
+
+    private var devicePatches: Set<PatchID> {
+        Set(state.deviceState?.applied.compactMap(PatchID.init(rawValue:)) ?? [])
+    }
 
     var body: some View {
         VStack(spacing: 18) {
-            Picker("", selection: $showPatched) {
-                Text("Stock").tag(false)
-                Text("Patched").tag(true)
+            Picker("", selection: $mode) {
+                Text("Stock").tag(Mode.stock)
+                Text("On iPod").tag(Mode.device)
+                Text("Selection").tag(Mode.selection)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 180)
+            .frame(width: 240)
+            .help("Stock firmware · what the iPod runs now · the patches selected in step 03")
 
-            IPodPreview(model: state.model, patches: state.selected, patched: showPatched)
+            IPodPreview(model: state.model,
+                        patches: mode == .device ? devicePatches : state.selected,
+                        patched: mode != .stock && !(mode == .device && devicePatches.isEmpty))
 
             VStack(alignment: .leading, spacing: 5) {
                 SpecRow(key: "model", value: state.device?.modelNumber ?? (state.model == nil ? "no iPod" : "—"))

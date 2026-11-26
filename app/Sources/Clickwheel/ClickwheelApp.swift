@@ -57,24 +57,16 @@ struct ContentView: View {
                 case .console: ConsolePage()
                 }
             }
-            .inspector(isPresented: $inspector) {
-                PreviewPanel()
-                    .inspectorColumnWidth(min: 250, ideal: 270, max: 320)
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .inspector(isPresented: $inspector) {
+            PreviewPanel()
+                .inspectorColumnWidth(min: 250, ideal: 270, max: 320)
         }
         .toolbar {
-            ToolbarItem(placement: .navigation) {
-                if let b = state.busy {
-                    HStack(spacing: 8) {
-                        BusyLabel(text: b + "…")
-                        if state.terminalTask != nil {
-                            Button("Stop Waiting") { state.stopWaiting() }
-                                .help("Stop waiting for the Terminal window; the command there keeps running")
-                        }
-                    }
-                }
-            }
             ToolbarItemGroup(placement: .primaryAction) {
+                // Only fixed items here: adding or removing a toolbar item (e.g. a busy label)
+                // resizes the window's columns and makes the page re-wrap. Busy state is in the sidebar.
                 Button("Rescan", systemImage: "arrow.triangle.2.circlepath") { Task { await state.scan(quiet: false) } }
                     .help("Look for connected iPods again")
                 Button("Preview", systemImage: "sidebar.trailing") { inspector.toggle() }
@@ -143,13 +135,22 @@ struct Sidebar: View {
                 Text(state.device == nil ? "NO DEVICE" : (state.device?.board ?? "iPod").uppercased())
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
             }
+            if let b = state.busy {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text(b.uppercased() + "…").lineLimit(1).truncationMode(.tail)
+                }
+                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Color.accentColor)
+                .transition(.opacity)
+            }
             Group {
                 Text("dev  " + (state.device.map { "/dev/" + $0.partition } ?? "—"))
                 Text("fw   " + (state.device?.firmwareVersion ?? "—"))
                 Text("osos " + (state.check?.osos.map { hex($0.length) } ?? "—"))
                 Text("sum  " + (state.check?.osos.map { hex32($0.checksum) } ?? "—"))
-                Text("on   " + (state.installed.map { $0.patches.map { String($0.prefix(3)) }.joined(separator: "+") } ?? "—"))
-                    .foregroundStyle(state.installed == nil ? Color.secondary : Theme.phosphor)
+                Text("on   " + (state.deviceState.flatMap { $0.patches.isEmpty ? nil : ($0.applied.isEmpty ? "stock" : $0.applied.map { String($0.prefix(3)) }.joined(separator: "+")) } ?? "?"))
+                    .foregroundStyle(state.deviceState?.applied.isEmpty == false ? Theme.phosphor : Color.secondary)
             }
             .font(Theme.monoTiny)
             .foregroundStyle(.secondary)
@@ -165,6 +166,19 @@ struct Sidebar: View {
 enum Snapshotter {
     static func runIfRequested(_ state: AppState) async {
         guard let dir = ProcessInfo.processInfo.environment["CLICKWHEEL_SNAPSHOT"] else { return }
+        if let n = ProcessInfo.processInfo.environment["CLICKWHEEL_FRAMES"].flatMap(Int.init) {
+            // Record the first moments after launch as numbered frames (to debug launch-time motion).
+            for i in 0..<n {
+                if let win = NSApp.windows.first(where: { $0.isVisible }), let view = win.contentView?.superview,
+                   let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                    view.cacheDisplay(in: view.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: dir).appendingPathComponent(String(format: "frame%02d.png", i)))
+                }
+                try? await Task.sleep(for: .milliseconds(150))
+            }
+            NSApp.terminate(nil)
+            return
+        }
         try? await Task.sleep(for: .seconds(3))
         func shot(_ name: String, sheet: Bool = false) {
             guard let main = NSApp.windows.first(where: { $0.isVisible && $0.sheetParent == nil }) else { return }
@@ -172,6 +186,11 @@ enum Snapshotter {
             guard let view = win.contentView?.superview, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
             view.cacheDisplay(in: view.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(name).png"))
+        }
+        if ProcessInfo.processInfo.environment["CLICKWHEEL_DEMO"] != nil {
+            state.setDeviceState(.init(patches: ["labels": "applied", "composers": "applied", "producers": "original"],
+                                       image: nil, source: .read, date: Date()))
+            try? await Task.sleep(for: .seconds(1))
         }
         for step in Step.allCases {
             state.step = step

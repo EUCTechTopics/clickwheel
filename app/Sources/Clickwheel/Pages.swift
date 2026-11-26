@@ -5,14 +5,20 @@ private struct Page<Content: View>: View {
     var subtitle: String
     @ViewBuilder var content: Content
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                PageHeader(step: step, subtitle: subtitle)
-                content
+        // The content width comes from the column, minus room reserved for a scroll bar. It must not
+        // depend on whether the scroll bar is showing: with "always visible" scroll bars (a mouse
+        // connected) that feedback made the page flip between two layouts forever.
+        GeometryReader { g in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    PageHeader(step: step, subtitle: subtitle)
+                    content
+                }
+                .frame(width: max(300, min(820, g.size.width - 2 * 28 - 16)), alignment: .leading)
+                .padding(.vertical, 28)
+                .padding(.leading, 28)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(28)
-            .frame(maxWidth: 820, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -36,7 +42,7 @@ struct DevicePage: View {
                             SpecRow(key: "board", value: d.board ?? "— (SysInfo not readable)")
                             SpecRow(key: "model no.", value: d.modelNumber ?? "—")
                             SpecRow(key: "firmware", value: [d.firmwareVersion, d.buildVersion.map { "build " + $0 }].compactMap { $0 }.joined(separator: " · ").ifEmpty("—"))
-                            SpecRow(key: "partition", value: "/dev/\(d.partition) · Apple_MDFW · \(hex(d.partitionSize, width: 7)) B")
+                            SpecRow(key: "partition", value: "/dev/\(d.partition) · Apple_MDFW · \(d.partitionSize >> 20) MiB")
                             SpecRow(key: "volume", value: d.mountPoint ?? "not mounted")
                         }
                     }
@@ -45,12 +51,13 @@ struct DevicePage: View {
                         Button("Eject", systemImage: "eject") { Task { await state.eject() } }
                     }
                 }
+                if d.model != nil { DeviceStateCard() }
                 verdict(d)
             } else {
                 Card {
                     VStack(spacing: 10) {
                         LED(color: .accentColor, pulsing: true)
-                        Text("Waiting for an iPod…").font(.title3.weight(.medium))
+                        Text(state.scannedOnce ? "Waiting for an iPod…" : "Looking for iPods…").font(.title3.weight(.medium))
                         Text("Connect a Mac-formatted click-wheel iPod. Clickwheel polls `diskutil` every 3 seconds.")
                             .foregroundStyle(.secondary)
                     }
@@ -86,9 +93,9 @@ struct DevicePage: View {
         } else if d.firmwareMatches == false {
             Callout(kind: .danger, text: "This iPod runs a different firmware version than the one the patches were made for (\(d.model!.firmware)). Clickwheel stops here.")
         } else {
-            Callout(kind: .ok, text: "Supported model. Next: make a verified backup of the firmware.")
+            Callout(kind: .ok, text: state.backupUsable ? "Supported model, and its verified backup is ready." : "Supported model. Next: make a verified backup of the firmware.")
         }
-        if d.model != nil && d.firmwareMatches != false { NextButton(to: .backup) }
+        if d.model != nil && d.firmwareMatches != false { NextButton(to: state.backupUsable ? .patches : .backup) }
     }
 }
 
@@ -183,7 +190,7 @@ struct PatchesPage: View {
             if !state.backupUsable {
                 Callout(kind: .info, text: "Make (or confirm) a verified backup of this iPod first. The patches are checked against it.")
             } else if let c = state.check {
-                InstalledBadge()
+                DeviceStateCard(compact: true)
                 if c.patchable == false {
                     Callout(kind: .danger, text: "**Not patchable.** At least one patch location in your firmware doesn't contain the expected bytes, so this isn't the supported build. Clickwheel won't build anything.")
                 }
@@ -211,6 +218,9 @@ struct PatchesPage: View {
                         }
                     }
                 }
+                if state.selectionIsInstalled && state.built == nil {
+                    Callout(kind: .ok, text: "**This selection is already on your iPod.** Change the toggles to build something different.")
+                }
                 if let b = state.built {
                     Callout(kind: .ok, text: "Built **\(URL(fileURLWithPath: b.output ?? "").lastPathComponent)** · sha256 `\(String((b.output_sha256 ?? "").prefix(16)))…`. Next: Flash.")
                     NextButton(to: .flash)
@@ -224,7 +234,7 @@ struct PatchesPage: View {
                         Label("Build Patched Copy", systemImage: "hammer.fill")
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(state.selected.isEmpty || c.patchable != true || state.busy != nil)
+                    .disabled(state.selected.isEmpty || c.patchable != true || state.busy != nil || state.selectionIsInstalled)
                 }
             } else {
                 BusyLabel(text: "running patch.py --check…")
@@ -247,8 +257,12 @@ struct PatchesPage: View {
                 Text(p.blurb).font(.callout).foregroundStyle(.secondary)
             }
             Spacer()
-            Badge(text: s == "original" ? "stock bytes" : s == "applied" ? "already applied" : s, color: s == "original" ? .secondary : s == "applied" ? Theme.phosphor : .red)
-                .help("State of these bytes in your backup")
+            if s == "mismatch" {
+                Badge(text: "unexpected bytes", color: .red).help("Your backup doesn't contain the expected bytes here")
+            } else if let d = state.deviceState?.patches[p.rawValue] {
+                Badge(text: d == "applied" ? "on iPod" : "not on iPod", color: d == "applied" ? Theme.phosphor : .secondary)
+                    .help("What the iPod runs now (\(state.deviceState?.sourceText ?? ""))")
+            }
             Toggle("", isOn: on).toggleStyle(.switch).labelsHidden().disabled(s == "mismatch")
         }
     }
@@ -288,7 +302,7 @@ struct FlashPage: View {
                     }
                 }
             } else {
-                InstalledBadge()
+                DeviceStateCard()
                 Callout(kind: .info, text: "Build a patched copy first (step 03).")
             }
         }
@@ -324,7 +338,7 @@ struct RestorePage: View {
                     SpecRow(key: "backup", value: "firmware/" + b.url.lastPathComponent)
                     SpecRow(key: "sha256", value: b.sha256)
                     if model != .g4 {
-                        SpecRow(key: "currently on iPod", value: state.lastFlashed.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "?")
+                        SpecRow(key: "currently on iPod", value: state.deviceState.map { $0.isStock && !$0.patches.isEmpty ? "original firmware" : ($0.applied.isEmpty ? ($0.image.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "unknown") : $0.applied.joined(separator: " + ")) } ?? "unknown")
                         Text("Only the sectors that differ between those two images are written; the script refuses if the iPod holds anything else.")
                             .font(.caption).foregroundStyle(.secondary)
                     }

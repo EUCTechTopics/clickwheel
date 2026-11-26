@@ -161,6 +161,7 @@ If the user prefers the app, explain that, and don't run it to change anything f
 | `scripts/rollback_fw.sh` | sudo: writes the original backup back |
 | `scripts/backup_fw_5g.sh`, `write_fw_5g.sh`, `rollback_fw_5g.sh` | sudo, iPod Video 5G (`--5g`): backup; write/undo only the differing sectors (leaves the hibernation image alone) via `write_sectors.py` |
 | `scripts/backup_fw_photo.sh`, `write_fw_photo.sh`, `rollback_fw_photo.sh` | sudo, iPod photo (`--photo`): same approach as the 5G scripts |
+| `scripts/device_state.sh` | sudo, read-only: reads the firmware partition to a temp file and runs `patch.py --check` on it (which patches are on the iPod now); never writes |
 | `scripts/ipod_model.sh` | Read-only: `4g`, `5g`, `photo` or `unknown` for a partition (SysInfo, else size); the sudo scripts refuse a mismatch |
 | `scripts/same_model.py` | Read-only: refuses a full-partition write (4G) when the device holds a different model's firmware |
 | `app/` | Clickwheel, the macOS GUI (SwiftUI). `app/build_app.sh` builds `app/build/Clickwheel.app` |

@@ -59,13 +59,15 @@ enum IPodModel: String, CaseIterable, Identifiable, Codable {
         case .g5: return ["scripts/backup_fw_5g.sh", part]
         }
     }
-    func writeCommand(part: String, image: String) -> [String] {
+    /// `from` is the image currently on the iPod (sector-diff writers only; the 4G writes everything).
+    func writeCommand(part: String, image: String, from: String? = nil) -> [String] {
         switch self {
         case .g4: return ["scripts/write_fw.sh", image, part]
-        case .photo: return ["scripts/write_fw_photo.sh", part, image]
-        case .g5: return ["scripts/write_fw_5g.sh", part, image]
+        case .photo: return ["scripts/write_fw_photo.sh", part, image] + (from.map { [$0] } ?? [])
+        case .g5: return ["scripts/write_fw_5g.sh", part, image] + (from.map { [$0] } ?? [])
         }
     }
+    func stateCommand(part: String) -> [String] { ["scripts/device_state.sh", rawValue, part, "--json"] }
     func rollbackCommand(part: String, image: String) -> [String] {
         switch self {
         case .g4: return ["scripts/rollback_fw.sh", part]

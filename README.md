@@ -90,7 +90,11 @@ open app/build/Clickwheel.app
   Disk Access, while the same `sudo` command works from Terminal.
 - The first time, macOS asks whether Clickwheel may read files on a removable volume. That's for
   `iPod_Control/Device/SysInfo` (model and firmware version).
-- The **Console** page logs every command and its output.
+- **On this iPod** shows which patches the connected iPod runs. The app knows it exactly after a
+  backup, a write or a rollback (each one reads the iPod back), remembers it per iPod, and
+  **Read from iPod…** checks it again (read-only, `sudo scripts/device_state.sh MODEL diskNs2`).
+  Knowing what's installed also lets you switch to another patch combination without rolling back first.
+- The **Console** page logs every command and its output (also in `~/Library/Logs/Clickwheel.log`).
 
 ## Quick start with Claude Code
 
@@ -277,6 +281,7 @@ A Finder/iTunes **firmware update or restore** removes the patches. Just run the
 │   ├── *_5g.sh               # sudo: iPod Video backup / write / rollback
 │   ├── *_photo.sh            # sudo: iPod photo backup / write / rollback
 │   ├── ipod_model.sh         # read-only: which model is this partition?
+│   ├── device_state.sh       # sudo, read-only: which patches are on the iPod now?
 │   ├── same_model.py         # read-only: device and image are the same model (4G write)
 │   └── write_sectors.py      # helper: write only the sectors that differ (5G, photo)
 ├── app/                      # Clickwheel.app (SwiftUI); build with app/build_app.sh
