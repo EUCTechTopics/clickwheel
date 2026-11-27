@@ -12,6 +12,12 @@ This repo patches the Apple firmware of click-wheel iPods. It supports three mod
   whole 2048-byte security sector, and writes go in whole 2048-byte sectors. `--55g` (model `55g`),
   scripts `backup_fw_55g.sh`, `write_fw_55g.sh`, `rollback_fw_55g.sh`; the app supports it. **Not yet
   tested on a device** (checked on a backup of the user's 5.5G and on a file standing in for the disk).
+- **iPod nano 1st generation** (USB product 4618 / `0x120A`), one firmware build (`osos` 0x54EF30 bytes):
+  `--nano` (model `nano`), scripts `backup_fw_nano.sh`, `write_fw_nano.sh`, `rollback_fw_nano.sh`; the
+  app supports it. Labels, Composers, Producers, volume and the boot logo (the 5G's 62×78 logo in its
+  aupd); no "Do not disconnect" picture (not identified). Its 64 MiB partition is the same size as the
+  5G's: `ipod_model.sh` and the app tell them apart by the USB product ID (`scripts/usb_product.py`).
+  **Tested on a device** (2026-11-27): Labels, Composers, Producers, volume limit, mirrored boot logo.
 
 The patches, available on all models, are:
 

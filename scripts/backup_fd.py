@@ -13,7 +13,7 @@ For the app (the iPod's current firmware, kept in ~/Library/Application Support/
 And, like scripts/device_state.sh (no unmount needed, nothing is saved):
   backup_fd.py state   MODEL diskNsM          < /dev/rdiskNsM   runs patch.py --check --json on the iPod
 
-MODEL is 4g, photo, 5g or 55g. Output: DIR/<backup file> (+ .sha256), made read-only. DIR defaults to
+MODEL is 4g, photo, 5g, 55g or nano. Output: DIR/<backup file> (+ .sha256), made read-only. DIR defaults to
 firmware/ in the repository (another folder is only for testing next to an existing backup).
 """
 import fcntl
@@ -30,6 +30,7 @@ MODELS = {
     "photo": ("ipodphoto_fw_backup.bin", 33554432, "an iPod photo/color (BoardHwName iPod P98)"),
     "5g": ("ipod5g_fw_backup.bin", 67108864, "an iPod Video (5G)"),
     "55g": ("ipod55g_fw_backup.bin", 167772160, "an iPod Video 5.5G"),
+    "nano": ("ipodnano_fw_backup.bin", 67108864, "an iPod nano (1st gen)"),
 }
 # Sector size per model: the 5.5G's disk uses 2048-byte sectors (reads and writes in whole sectors).
 SECTOR = {"55g": 2048}

@@ -145,7 +145,7 @@ struct IPodPreview: View {
     private var rootItems: [String] {
         switch model {
         case .g5, .g55: return ["Music", "Photos", "Videos", "Extras", "Settings", "Shuffle Songs", "Backlight"]
-        case .photo: return ["Music", "Photos", "Extras", "Settings", "Shuffle Songs", "Backlight"]
+        case .photo, .nano: return ["Music", "Photos", "Extras", "Settings", "Shuffle Songs", "Backlight"]
         default: return ["Music", "Extras", "Settings", "Shuffle Songs", "Backlight"]
         }
     }

@@ -149,6 +149,36 @@ appears in the 8 bytes after the table.
 operand of #248's last `NAME` from `0x1069` to `0x104C`: one byte at `osos+0x4BA8FA`
 (partition `0x4BEEFA`), `69` → `4C`.
 
+## iPod nano (1st gen) port
+
+The user's nano (USB product `0x120A`, 4 GB) has a 64 MiB partition with 512-byte sectors, laid out
+like the 5G's: `osos` at `0x4600` (`0x54EF30` bytes, version `0xC009`, checksum `0x1F75B246`), `rsrc`
+(16 MiB), `aupd` at `0x1553A00`, `hibe` at `0x15D8E00`. Same script VM (opcode spec table at
+`osos+0x522570`, identical to the 5G's).
+
+| What | nano |
+|---|---|
+| English strings (partition) | "Genres" `0x3209D4`, `0x3219A8`, `0x324406`, `0x3245C8`, `0x324A34`; "Composers" `0x3209DC`, `0x32198C`, `0x3243F6`, `0x3245BC`, `0x324A68` (French and Dutch blocks before them) |
+| Script function table | `osos+0x32089C`, 809 × u32, trailer u32 `0x10E93`, u32 `0x30000` at `osos+0x321540` |
+| Global name of function *i* | `0xE93 + i` |
+| Library object | name `0x11C1`; select props artist `0x101`, composer `0x102`, album `0x103`, genre `0x104`; set root `0x116` |
+
+| Category | Open list (builds) | List descriptor → `setRoot(n)` | Item picked (UI cmd) → opens |
+|---|---|---|---|
+| artist | #236 `0xF7F` (`0x117`) | #237 → 1 | #238 (`0x63A4`) → `0xF6A` albums |
+| composer | #207 `0xF62` (`0x118`) | #209 → 2 | #210 (`0x63A5`) → `0xF6A` albums |
+| album | #215 `0xF6A` | | #220 (`0x63A6`) → `0xF5A` songs |
+| genre | | | **#244 (`0x63A7`) → `0xF7F` artists** |
+
+The composer patch changes #244's last `NAME` from `0x0F7F` to `0x0F62`: partition `0x32A7B8`, `7F` → `62`.
+The volume-cap getter is byte-identical to the 5G's (object `0x10731DAC`) at `osos+0x24C28`; its caller
+at `osos+0x317CC` does `cmp r0, #0; moveq r0, #256; movne r0, #216`. Patch `01 00` → `00 01` at
+partition `0x29230`. The boot logo: aupd decrypts with the RC4 method (key from its 512-byte security
+block, byte sum = checksum `0x0483 5EDD`); its 28-byte `LoGo` header and 62×78 pixels (partition
+`0x1593724`) are the 5G's stock logo, byte for byte. Pictures in the nano's osos use format `0x2565`
+(not the 5G's `0x565`); its only 100×100 picture is a check mark, so the "Do not disconnect" picture
+was not identified. All nano patches were tested on the user's device (2026-11-27).
+
 ## iPod photo / iPod color port (firmware 1.2.1)
 
 Ported without a device dump: Apple's updater `iPod_11.1.2.1.ipsw` (identical to `iPod_5.1.2.1`,

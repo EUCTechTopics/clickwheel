@@ -5,6 +5,7 @@ Supported (--model, default 4g):
   4g     iPod 4th gen click wheel (iPod Q21), firmware 3.1.1
   5g     iPod Video 5th gen, the build in the user's backup          (--5g is short for --model 5g)
   55g    iPod Video 5.5th gen: the same osos and aupd as 5g, laid out in 2048-byte sectors (160 MiB partition)
+  nano   iPod nano 1st gen, the build in the user's backup (osos 0x54EF30 bytes; 64 MiB like the 5g)
   photo  iPod photo / iPod color (iPod P98), firmware 1.2.1 (4.2.1)  (--photo is short for --model photo)
 
 Usage:
@@ -232,6 +233,56 @@ MODELS['55g'] = _shifted(MODELS['5g'], 'iPod Video 5.5G (osos 0x735A00 bytes, 20
                          167772160, 0x736000, ('ipod55g_fw_backup.bin', 'ipod55g_fw_patched.bin'),
                          0x5000 - 0x4600, 0xC3C800 - 0xC3A400)
 MODELS['55g']['sector'] = 0x800
+
+# iPod nano 1st gen (USB product 0x120A): same image format, script VM and aupd encryption as the 5G,
+# its own osos build (0x54EF30 bytes, version 0xC009). Partition offsets (osos at 0x4600):
+# - English strings: "Genres" and "Composers" five times each, in the same contexts as on the 5G.
+# - Script function table at osos 0x32089C (809 entries, trailer u32 0x10E93, u32 0x30000 at 0x321540),
+#   names 0xE93 + i. Genre "item picked" handler #244 (0xF87: select prop 0x104, UI cmd 0x63A7) ends
+#   with openArtists 0xF7F (#236: builds 0x117, descriptor #237 setRoot(1)); openComposers is 0xF62
+#   (#207: builds 0x118, descriptor #209 setRoot(2)). Composers patch: that NAME operand 7F -> 62.
+# - Volume cap getter at osos 0x24C28, identical to the 5G's (object 0x10731DAC, field 0x94, bit 0),
+#   2 callers; one does the 256/216 maximum-volume choice at osos 0x317D4.
+# - Boot logo: aupd (RC4, key from its security block) holds the 5G's 'LoGo' picture with the same
+#   pixels; pixels at partition 0x1593724. The "Do not disconnect" picture isn't identified (the nano's
+#   own 100x100 picture is a check mark, its pictures use format 0x2565), so --dnd is not offered.
+MODELS['nano'] = {
+    'name': 'iPod nano 1st gen (osos 0x54EF30 bytes)',
+    'part_size': 67108864,
+    'osos_len': 0x54EF30,
+    'input': 'ipodnano_fw_backup.bin',
+    'output': 'ipodnano_fw_patched.bin',
+    'aupd_flashed': 0x4258,
+    'patches': {
+        'labels': {
+            'desc': 'English "Genres" -> "Labels" (5 menu strings)',
+            'edits': [(o, b'Genres', b'Labels') for o in (0x3209D4, 0x3219A8, 0x324406, 0x3245C8, 0x324A34)],
+            'context': [],
+        },
+        'composers': {
+            'desc': 'Genre/Label list opens Composers instead of Artists (script func #244: name 0xF7F -> 0xF62)',
+            'edits': [(0x32A7B8, b'\x7f', b'\x62')],
+            'context': [(0x32A7B2, bytes.fromhex('3a000202' '3b0f'), 0x32A7B9, bytes.fromhex('39540000' '3a0001' '0243'))],
+        },
+        'producers': {
+            'desc': 'English "Composers" -> "Producers" (5 menu strings)',
+            'edits': [(o, b'Composers', b'Producers') for o in (0x3209DC, 0x32198C, 0x3243F6, 0x3245BC, 0x324A68)],
+            'context': [],
+        },
+        'logo': {
+            'desc': 'Boot Apple logo (62x78, in aupd): upside down, or your own BMP',
+            'cipher': dict(MODELS['5g']['patches']['logo']['cipher'], offset=0x1593724),
+            'context': [],
+        },
+        'volume': {
+            'desc': 'No built-in volume limit (volume-cap check always answers "no")',
+            'edits': [(0x29230, b'\x01\x00', b'\x00\x01')],
+            'context': [(0x29228, bytes.fromhex('08009fe5' '940090e5'), 0x29232, bytes.fromhex('00e2' '1eff2fe1' 'ac1d7310'))],
+        },
+    },
+}
+for k in ('wizard_flip', 'legacy_stock_sha256'):        # those exist only for the 5G user's own dumps
+    MODELS['nano']['patches']['logo']['cipher'].pop(k, None)
 
 def sector(buf):
     """Sector size of a firmware partition: 2048 bytes for the 5.5G's 160 MiB partition, else 512."""
@@ -544,6 +595,7 @@ def main():
     ap.add_argument('--model', choices=sorted(MODELS), help='firmware model (default 4g)')
     ap.add_argument('--5g', dest='g5', action='store_true', help='short for --model 5g')
     ap.add_argument('--55g', dest='g55', action='store_true', help='short for --model 55g')
+    ap.add_argument('--nano', action='store_true', help='short for --model nano')
     ap.add_argument('--photo', action='store_true', help='short for --model photo')
     ap.add_argument('-i', '--input')
     ap.add_argument('-o', '--output')
@@ -571,7 +623,7 @@ def main():
     ap.add_argument('--find', metavar='TEXT', help='read-only: list every occurrence of TEXT in the osos image')
     a = ap.parse_args()
     JSON = a.json
-    picked = [k for k, on in (('5g', a.g5), ('55g', a.g55), ('photo', a.photo)) if on] + ([a.model] if a.model else [])
+    picked = [k for k, on in (('5g', a.g5), ('55g', a.g55), ('nano', a.nano), ('photo', a.photo)) if on] + ([a.model] if a.model else [])
     if len(set(picked)) > 1:
         fail(f'conflicting models: {", ".join(sorted(set(picked)))}')
     model = picked[0] if picked else '4g'

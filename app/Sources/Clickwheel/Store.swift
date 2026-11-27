@@ -182,6 +182,21 @@ final class AppState {
         }.value
     }
 
+    /// USB product ID of the iPod behind a disk (same lookup as scripts/usb_product.py), off the main thread.
+    nonisolated static func usbProduct(disk: String) async -> Int? {
+        await Task.detached(priority: .userInitiated) {
+            let r = await Runner.run("/usr/sbin/ioreg", ["-a", "-r", "-c", "IOUSBHostDevice", "-l"])
+            guard r.ok, let roots = try? PropertyListSerialization.propertyList(from: Data(r.stdout.utf8), format: nil) as? [[String: Any]]
+            else { return nil }
+            func holds(_ n: [String: Any]) -> Bool {
+                if n["BSD Name"] as? String == disk { return true }
+                return ((n["IORegistryEntryChildren"] as? [[String: Any]]) ?? []).contains(where: holds)
+            }
+            return roots.first { ($0["idVendor"] as? Int) == 1452 && holds($0) }?["idProduct"] as? Int
+        }.value
+    }
+    private var usbProducts: [String: Int] = [:]
+
     func scan(quiet: Bool) async {
         guard !scanning else { return }
         scanning = true
@@ -204,9 +219,14 @@ final class AppState {
             var sys: [String: String] = [:]
             if let mount { sys = await Self.readSysInfo(mount) }
             if sys.isEmpty, let c = cachedSysInfo[fwID] { sys = c }  // unmounted by a script: reuse what we read before
+            // cached per disk and size (macOS reuses disk names when iPods are swapped)
+            let usbKey = "\(disk)|\((d["Size"] as? Int) ?? 0)"
+            if usbProducts[usbKey] == nil, let p = await Self.usbProduct(disk: disk) { usbProducts[usbKey] = p }
             found.append(Device(disk: disk, partition: fwID, partitionSize: size, volumeName: data?["VolumeName"] as? String,
-                                mountPoint: mount, sysInfo: sys, capacity: d["Size"] as? Int))
+                                mountPoint: mount, sysInfo: sys, capacity: d["Size"] as? Int, usbProduct: usbProducts[usbKey]))
         }
+        let present = Set(disks.map { "\(($0["DeviceIdentifier"] as? String) ?? "")|\(($0["Size"] as? Int) ?? 0)" })
+        usbProducts = usbProducts.filter { present.contains($0.key) }
         let dev = found.first
         if let dev, !dev.sysInfo.isEmpty { cachedSysInfo[dev.partition] = dev.sysInfo }
         if dev != device {

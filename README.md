@@ -161,6 +161,12 @@ An **iPod Video 5.5th gen** has the same firmware, but its disk uses 2048-byte s
 firmware partition. Use `--55g` and the `_55g` scripts (`backup_fw_55g.sh`, `write_fw_55g.sh`,
 `rollback_fw_55g.sh`); all the iPod Video tweaks are available. Not yet tested on a device.
 
+An **iPod nano (1st generation)** uses `--nano` and the `_nano` scripts (`backup_fw_nano.sh`,
+`write_fw_nano.sh`, `rollback_fw_nano.sh`): Labels, Composers, Producers, the volume limit and the boot
+logo (upside down, mirrored or your own 62×78 BMP). Its firmware partition is the same size as the
+iPod Video's, so the scripts tell them apart by the USB product ID. Tested on a device: all of these
+(the boot logo with the mirror).
+
 On an **iPod photo / iPod color** (firmware 1.2.1), use `--photo` and the `_photo` scripts:
 
 ```sh
@@ -327,6 +333,8 @@ A Finder/iTunes **firmware update or restore** removes the patches. Just run the
 │   ├── rollback_fw.sh        # sudo: write the original backup back
 │   ├── *_5g.sh               # sudo: iPod Video backup / write / rollback
 │   ├── *_55g.sh              # sudo: iPod Video 5.5G backup / write / rollback (2048-byte sectors)
+│   ├── *_nano.sh             # sudo: iPod nano (1st gen) backup / write / rollback
+│   ├── usb_product.py        # read-only: the iPod's USB product ID (nano vs iPod Video)
 │   ├── *_photo.sh            # sudo: iPod photo backup / write / rollback
 │   ├── ipod_model.sh         # read-only: which model is this partition?
 │   ├── device_state.sh       # sudo, read-only: which patches are on the iPod now?

@@ -7,6 +7,8 @@ enum IPodModel: String, CaseIterable, Identifiable, Codable {
     case g5 = "5g"
     /// iPod Video 5.5th gen: the 5G's firmware, laid out in 2048-byte sectors (160 MiB partition).
     case g55 = "55g"
+    /// iPod nano 1st gen: a 64 MiB partition like the 5G's, told apart by its USB product ID (4618).
+    case nano = "nano"
 
     var id: String { rawValue }
     /// Either iPod Video (5G or 5.5G): same firmware, screen and tweaks.
@@ -18,6 +20,7 @@ enum IPodModel: String, CaseIterable, Identifiable, Codable {
         case .photo: return "iPod photo / color"
         case .g5: return "iPod Video (5th gen)"
         case .g55: return "iPod Video (5.5th gen)"
+        case .nano: return "iPod nano (1st gen)"
         }
     }
 
@@ -26,6 +29,7 @@ enum IPodModel: String, CaseIterable, Identifiable, Codable {
         case .g4: return "iPod Q21"
         case .photo: return "iPod P98"
         case .g5, .g55: return "iPod Video"
+        case .nano: return "iPod nano"
         }
     }
 
@@ -34,16 +38,18 @@ enum IPodModel: String, CaseIterable, Identifiable, Codable {
         case .g4: return "3.1.1"
         case .photo: return "1.2.1 (4.2.1)"
         case .g5, .g55: return "osos 0x735A00"
+        case .nano: return "osos 0x54EF30"
         }
     }
 
-    var partitionSize: Int { self == .g55 ? 167_772_160 : self == .g5 ? 67_108_864 : 33_554_432 }
+    var partitionSize: Int { self == .g55 ? 167_772_160 : self == .g5 || self == .nano ? 67_108_864 : 33_554_432 }
     var backupFile: String {
         switch self {
         case .g4: return "ipod_fw_backup.bin"
         case .photo: return "ipodphoto_fw_backup.bin"
         case .g5: return "ipod5g_fw_backup.bin"
         case .g55: return "ipod55g_fw_backup.bin"
+        case .nano: return "ipodnano_fw_backup.bin"
         }
     }
     var patchedFile: String {
@@ -52,11 +58,12 @@ enum IPodModel: String, CaseIterable, Identifiable, Codable {
         case .photo: return "ipodphoto_fw_patched.bin"
         case .g5: return "ipod5g_fw_patched.bin"
         case .g55: return "ipod55g_fw_patched.bin"
+        case .nano: return "ipodnano_fw_patched.bin"
         }
     }
     var colorScreen: Bool { self != .g4 }
     /// Screen height in pixels (to show pictures at their real size on the preview).
-    var screenHeight: CGFloat { isVideo ? 240 : self == .photo ? 176 : 128 }
+    var screenHeight: CGFloat { isVideo ? 240 : self == .photo ? 176 : self == .nano ? 132 : 128 }
     /// Tested on a real device by the project.
     var deviceTested: Bool { true }
 }
@@ -75,7 +82,7 @@ enum PatchID: String, CaseIterable, Identifiable {
     /// Offered for this model? The boot logo and the DnD picture exist for the iPod photo / color and the iPod Video.
     func available(on model: IPodModel?) -> Bool {
         switch self {
-        case .logo: return model == .photo || model?.isVideo == true
+        case .logo: return model == .photo || model == .nano || model?.isVideo == true
         case .dnd: return model == .photo || model?.isVideo == true
         default: return true
         }
@@ -85,10 +92,10 @@ enum PatchID: String, CaseIterable, Identifiable {
     /// The preview screen that shows this change.
     var previewMode: PreviewMode { self == .logo ? .startup : self == .dnd ? .connected : .menus }
     /// Option-click on the switch uses your own picture instead (the boot logo on the iPod photo and Video).
-    func ownPictureOptional(on model: IPodModel?) -> Bool { self == .logo && (model == .photo || model?.isVideo == true) }
+    func ownPictureOptional(on model: IPodModel?) -> Bool { self == .logo && (model == .photo || model == .nano || model?.isVideo == true) }
     /// Size of the BMP this change takes: the boot logo is 78×100 on the iPod photo, 62×78 on the iPod Video.
     func pictureSize(on model: IPodModel?) -> (width: Int, height: Int) {
-        self == .logo ? (model?.isVideo == true ? (62, 78) : (78, 100)) : (100, 100)
+        self == .logo ? (model?.isVideo == true || model == .nano ? (62, 78) : (78, 100)) : (100, 100)
     }
     /// patch.py option that takes the picture file (or "keep").
     var pictureFlag: String { self == .logo ? "--logo-image" : flag }
@@ -165,6 +172,8 @@ struct Device: Equatable {
     var mountPoint: String?
     var sysInfo: [String: String]
     var capacity: Int? = nil    // whole disk, bytes
+    /// USB product ID (4617 iPod Video, 4618 iPod nano 1G), to tell same-size partitions apart.
+    var usbProduct: Int? = nil
 
     var board: String? { sysInfo["BoardHwName"] }
     var modelNumber: String? { sysInfo["ModelNumStr"] }
@@ -185,7 +194,9 @@ struct Device: Equatable {
         switch board {
         case "iPod Q21": return .g4
         case "iPod P98": return .photo
-        case nil, "": return partitionSize == 67_108_864 ? .g5 : partitionSize == 167_772_160 ? .g55 : nil
+        case nil, "":
+            if partitionSize == 67_108_864 { return usbProduct == 4618 ? .nano : .g5 }
+            return partitionSize == 167_772_160 ? .g55 : nil
         default: return nil
         }
     }
@@ -196,7 +207,7 @@ struct Device: Equatable {
         switch model {
         case .g4: return b.contains("(3.1.1)")
         case .photo: return b.contains("(4.2.1)")
-        case .g5, .g55: return nil
+        case .g5, .g55, .nano: return nil
         }
     }
 }
