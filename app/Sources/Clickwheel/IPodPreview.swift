@@ -11,15 +11,20 @@ struct IPodPreview: View {
     /// The iPod's own music; examples are used when it can't be read.
     var music: [LibraryReport.Genre]?
 
-    @State private var screen = 0
+    /// Where the user is: the menus from the main menu down (MENU pops, the centre button pushes).
+    @State private var stack: [Node] = [.root, .music]
+    /// Direction of the last move, for the slide transition.
+    @State private var forward = true
     @State private var bodyDark = false
-    /// Selection per screen once the user scrolls the wheel; autoplay pauses after interaction.
+    /// Selection per depth once the user scrolls the wheel; autoplay pauses after interaction.
     @State private var selection: [Int: Int] = [:]
     @State private var touched = Date.distantPast
     @State private var lastAngle: Double?
     @State private var turned: Double = 0
 
-    private func sel(_ i: Int) -> Int { selection[i] ?? screens[i].sel }
+    private var depth: Int { stack.count - 1 }
+    private var current: Screen { screen(stack[depth]) }
+    private func sel(_ d: Int) -> Int { selection[d] ?? screen(stack[d]).sel }
 
     private var genre: String { patched && patches.contains(.labels) ? "Labels" : "Genres" }
     private var composer: String { patched && patches.contains(.producers) ? "Producers" : "Composers" }
@@ -28,6 +33,15 @@ struct IPodPreview: View {
     struct Screen { let title: String; let items: [String]; let sel: Int }
     /// Rows the screen shows at once; longer lists scroll with the selection.
     static let rows = 6
+
+    /// A menu of the iPod, as far as the preview can show it (songs, photos and videos are not read).
+    enum Node: Hashable {
+        case root, music, extras, settings, playlists, allAlbums
+        case labels                                           // Music ▸ Genres (Labels)
+        case labelPeople(label: Int)                          // a genre's artists (composers when patched); 0 = All
+        case people(composers: Bool)                          // Music ▸ Artists / Composers
+        case albums(label: Int?, composers: Bool, person: Int) // a person's albums; person 0 = All
+    }
 
     /// Example music when the iPod's own library isn't available.
     private static let examples: [LibraryReport.Genre] = {
@@ -70,12 +84,13 @@ struct IPodPreview: View {
             ?? ls.max { $0.songs < $1.songs }
         return best.flatMap { b in ls.firstIndex { $0.name == b.name } } ?? 0
     }
-    private var labelRow: Int { selection[1] ?? defaultLabel + 1 }          // 0 = All
-    private var people: [LibraryReport.Person] {
-        let gs = labelRow == 0 ? labels : [labels[min(labelRow - 1, labels.count - 1)]]
+    /// Artists (or composers) of one label (row in the label list, 0 = All) or, with nil, of the whole library.
+    private func people(label: Int?, composers: Bool) -> [LibraryReport.Person] {
+        let ls = labels
+        let gs = label == nil || label == 0 ? ls : [ls[min(label! - 1, ls.count - 1)]]
         var merged: [(name: String, albums: [String])] = []
         for g in gs {
-            for p in drillsToComposers ? g.composers : g.artists {
+            for p in composers ? g.composers : g.artists {
                 if let i = merged.firstIndex(where: { $0.name == p.name }) {
                     merged[i].albums += p.albums.filter { !merged[i].albums.contains($0) }
                 } else {
@@ -87,33 +102,102 @@ struct IPodPreview: View {
         return merged.sorted { order.firstIndex(of: $0.name)! < order.firstIndex(of: $1.name)! }
             .map { LibraryReport.Person(name: $0.name, albums: Self.sorted($0.albums)) }
     }
-    private var defaultPerson: Int {
-        let ps = people
-        return ps.indices.max { ps[$0].albums.count < ps[$1].albums.count } ?? 0
+    /// Default person for the autoplay: the one with the most albums.
+    private func defaultPerson(_ ps: [LibraryReport.Person]) -> Int {
+        ps.indices.max { ps[$0].albums.count < ps[$1].albums.count } ?? 0
     }
-    private var personRow: Int { selection[2] ?? (people.isEmpty ? 0 : defaultPerson + 1) }
-    private var albums: [String] {
-        let ps = people
+    private func albums(of ps: [LibraryReport.Person], _ person: Int) -> [String] {
         if ps.isEmpty { return [] }
-        if personRow == 0 { return Self.sorted(Array(Set(ps.flatMap(\.albums)))) }
-        return ps[min(personRow - 1, ps.count - 1)].albums
+        if person == 0 { return Self.sorted(Array(Set(ps.flatMap(\.albums)))) }
+        return ps[min(person - 1, ps.count - 1)].albums
     }
 
-    private var screens: [Screen] {
-        let ls = labels, ps = people, al = albums
-        return [
-            Screen(title: "Music", items: ["Playlists", "Artists", "Albums", "Songs", genre, composer], sel: 4),
-            Screen(title: genre, items: ["All"] + ls.map(\.name), sel: defaultLabel + 1),
-            Screen(title: labelRow == 0 ? genre : ls[min(labelRow - 1, ls.count - 1)].name,
-                   items: ["All"] + ps.map(\.name), sel: ps.isEmpty ? 0 : defaultPerson + 1),
-            Screen(title: personRow == 0 || ps.isEmpty ? (drillsToComposers ? composer : "Artists") : ps[min(personRow - 1, ps.count - 1)].name,
-                   items: ["All"] + al, sel: al.isEmpty ? 0 : 1),
-        ]
+    private var rootItems: [String] {
+        switch model {
+        case .g5: return ["Music", "Photos", "Videos", "Extras", "Settings", "Shuffle Songs", "Backlight"]
+        case .photo: return ["Music", "Photos", "Extras", "Settings", "Shuffle Songs", "Backlight"]
+        default: return ["Music", "Extras", "Settings", "Shuffle Songs", "Backlight"]
+        }
+    }
+    private var musicItems: [String] {
+        ["Playlists", "Artists", "Albums", "Songs", genre, composer, "Audiobooks"] + (model == .g5 ? ["Search"] : [])
+    }
+    /// Podcasts is left out, so Genres/Labels and Composers/Producers fit on the first screen.
+    private static let genreRow = 4
+
+    /// What a menu shows; `sel` is where the highlight starts (along the browse path the autoplay shows).
+    private func screen(_ n: Node) -> Screen {
+        switch n {
+        case .root: return Screen(title: "iPod", items: rootItems, sel: 0)
+        case .music: return Screen(title: "Music", items: musicItems, sel: Self.genreRow)
+        case .extras:
+            return Screen(title: "Extras", items: ["Clock", "Contacts", "Calendar", "Notes", "Games"] + (model == .g5 ? ["Stopwatch", "Screen Lock"] : []), sel: 0)
+        case .settings:
+            return Screen(title: "Settings", items: ["About", "Shuffle", "Repeat", "Volume Limit", "Backlight Timer"]
+                          + (model == .g4 ? [] : ["Brightness"])
+                          + ["Audiobooks", "EQ", "Sound Check", "Clicker", "Date & Time", "Contacts", "Language", "Legal", "Reset All Settings"], sel: 0)
+        case .playlists: return Screen(title: "Playlists", items: ["On-The-Go"], sel: 0)
+        case .allAlbums:
+            return Screen(title: "Albums", items: Self.sorted(Array(Set(labels.flatMap { $0.artists.flatMap(\.albums) }))), sel: 0)
+        case .labels:
+            return Screen(title: genre, items: ["All"] + labels.map(\.name), sel: defaultLabel + 1)
+        case .labelPeople(let l):
+            let ls = labels, ps = people(label: l, composers: drillsToComposers)
+            return Screen(title: l == 0 ? genre : ls[min(l - 1, ls.count - 1)].name,
+                          items: ["All"] + ps.map(\.name), sel: ps.isEmpty ? 0 : defaultPerson(ps) + 1)
+        case .people(let c):
+            let ps = people(label: nil, composers: c)
+            return Screen(title: c ? composer : "Artists", items: ["All"] + ps.map(\.name), sel: 0)
+        case .albums(let l, let c, let p):
+            let ps = people(label: l, composers: c), al = albums(of: ps, p)
+            return Screen(title: p == 0 || ps.isEmpty ? (c ? composer : "Artists") : ps[min(p - 1, ps.count - 1)].name,
+                          items: ["All"] + al, sel: al.isEmpty ? 0 : 1)
+        }
     }
 
-    /// The browse path, without the example label the screens open.
-    var path: [String] {
-        ["Music", genre, drillsToComposers ? composer : "Artists", "Albums"]
+    /// The menu the centre button opens from row `i` of `n`, or nil (songs, photos etc. aren't shown).
+    private func child(_ n: Node, _ i: Int) -> Node? {
+        switch n {
+        case .root:
+            switch rootItems[i] { case "Music": return .music; case "Extras": return .extras; case "Settings": return .settings; default: return nil }
+        case .music:
+            switch i {
+            case 0: return .playlists
+            case 1: return .people(composers: false)
+            case 2: return .allAlbums
+            case Self.genreRow: return .labels
+            case Self.genreRow + 1: return .people(composers: true)
+            default: return nil
+            }
+        case .labels: return .labelPeople(label: i)
+        case .labelPeople(let l):
+            return people(label: l, composers: drillsToComposers).isEmpty ? nil : .albums(label: l, composers: drillsToComposers, person: i)
+        case .people(let c):
+            return people(label: nil, composers: c).isEmpty ? nil : .albums(label: nil, composers: c, person: i)
+        default: return nil
+        }
+    }
+
+    /// The browse path the autoplay walks: main menu ▸ Music ▸ Genres/Labels ▸ a label ▸ a person.
+    private var demo: [Node] {
+        let l = defaultLabel + 1, ps = people(label: l, composers: drillsToComposers)
+        return [.root, .music, .labels, .labelPeople(label: l)]
+            + (ps.isEmpty ? [] : [.albums(label: l, composers: drillsToComposers, person: defaultPerson(ps) + 1)])
+    }
+
+    /// Name of a menu in the breadcrumb.
+    private func crumb(_ n: Node) -> String {
+        switch n {
+        case .root: return "iPod"
+        case .music: return "Music"
+        case .extras: return "Extras"
+        case .settings: return "Settings"
+        case .playlists: return "Playlists"
+        case .labels: return genre
+        case .labelPeople: return drillsToComposers ? composer : "Artists"
+        case .people(let c): return c ? composer : "Artists"
+        case .albums, .allAlbums: return "Albums"
+        }
     }
 
     var body: some View {
@@ -124,12 +208,15 @@ struct IPodPreview: View {
             // breadcrumb of the browse path
             if mode == .menus { breadcrumb }
         }
-        // Switching a change keeps the place in the walk, so the difference shows where you are.
+        // Switching a change keeps the place, so the difference shows where you are.
         .onChange(of: drillsToComposers) {
             touched = Date()                                     // hold the autoplay a moment
             withAnimation(.easeInOut(duration: 0.2)) {
-                for k in selection.keys where k >= 2 { selection[k] = nil }   // artists <-> composers
-                if screen > 2 { screen = 2 }                     // that person may not be in the other list
+                // a label's artists <-> composers: that person may not be in the other list
+                if let i = stack.firstIndex(where: { if case .labelPeople = $0 { return true }; return false }) {
+                    stack = Array(stack.prefix(i + 1))
+                    for k in selection.keys where k >= i { selection[k] = nil }
+                }
             }
         }
         .onChange(of: patches) { touched = Date() }
@@ -137,19 +224,23 @@ struct IPodPreview: View {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1.9))
                 guard mode == .menus, Date().timeIntervalSince(touched) > 8 else { continue }  // the user is driving
-                withAnimation(.snappy(duration: 0.35)) { screen = (screen + 1) % 4; selection = [:] }
+                // walk the browse path one menu deeper each step, then start again at the main menu
+                let path = demo
+                let next = stack.count < path.count && Array(path.prefix(stack.count)) == stack ? stack.count + 1 : 1
+                forward = next > 1
+                withAnimation(.snappy(duration: 0.35)) { stack = Array(path.prefix(next)); selection = [:] }
             }
         }
     }
 
     private var breadcrumb: some View {
             HStack(spacing: 4) {
-                ForEach(Array(path.enumerated()), id: \.offset) { i, p in
+                ForEach(Array(stack.enumerated()), id: \.offset) { i, n in
+                    let p = crumb(n)
                     if i > 0 { Image(systemName: "chevron.right").font(.system(size: 7, weight: .bold)).foregroundStyle(.tertiary) }
                     Text(p)
-                        .foregroundStyle(i == [1, 1, 2, 3][screen] ? Color.primary : .secondary)
                         .fontWeight(highlight(p) ? .bold : .regular)
-                        .foregroundStyle(highlight(p) ? Theme.phosphor : .secondary)
+                        .foregroundStyle(highlight(p) ? Theme.phosphor : i == depth ? Color.primary : .secondary)
                 }
             }
             .font(Theme.monoTiny)
@@ -225,8 +316,12 @@ struct IPodPreview: View {
 
     private var menuLCD: some View {
         let color = model?.colorScreen ?? true
-        let s = screens[screen]
-        return ZStack(alignment: .top) {
+        let s = current, node = stack[depth]
+        return GeometryReader { g in
+        // the rows share the height under the title bar, so the last one ends at the bottom of the screen
+        // (minus the 2-point frame drawn over the screen's edge)
+        let rowHeight = (g.size.height - 17 - (color ? 0.5 : 1) - 2) / CGFloat(Self.rows)
+        ZStack(alignment: .top) {
             (color ? Color.white : Color(red: 0.70, green: 0.76, blue: 0.70))
             VStack(spacing: 0) {
                 // title bar
@@ -247,20 +342,20 @@ struct IPodPreview: View {
                 Rectangle().fill(.black.opacity(color ? 0.25 : 0.7)).frame(height: color ? 0.5 : 1)
                 // rows
                 VStack(spacing: 0) {
-                    let first = max(0, min(sel(screen) - (Self.rows - 1), s.items.count - Self.rows))
+                    let first = max(0, min(sel(depth) - (Self.rows - 1), s.items.count - Self.rows))
                     ForEach(Array(s.items.enumerated()).filter { $0.offset >= first && $0.offset < first + Self.rows }, id: \.offset) { i, item in
                         HStack {
-                            Text(item).font(.system(size: 10.5, weight: i == sel(screen) ? .semibold : .regular)).lineLimit(1)
+                            Text(item).font(.system(size: 10.5, weight: i == sel(depth) ? .semibold : .regular)).lineLimit(1)
                             Spacer()
-                            if screen < 3 || i > 0 {
+                            if child(node, i) != nil {
                                 Image(systemName: "chevron.right").font(.system(size: 7, weight: .heavy))
                             }
                         }
                         .padding(.horizontal, 5)
-                        .frame(height: 15.5)
-                        .foregroundStyle(i == sel(screen) ? .white : .black)
+                        .frame(height: rowHeight)
+                        .foregroundStyle(i == sel(depth) ? .white : .black)
                         .background {
-                            if i == sel(screen) {
+                            if i == sel(depth) {
                                 if color {
                                     LinearGradient(colors: [Color(red: 0.35, green: 0.62, blue: 1.0), Color(red: 0.05, green: 0.36, blue: 0.85)],
                                                    startPoint: .top, endPoint: .bottom)
@@ -271,9 +366,10 @@ struct IPodPreview: View {
                         }
                     }
                 }
-                .id(screen)
-                .transition(.push(from: .trailing))
+                .id(stack)
+                .transition(.push(from: forward ? .trailing : .leading))
             }
+        }
         }
     }
 
@@ -282,24 +378,35 @@ struct IPodPreview: View {
     }
 
     private func scroll(_ d: Int) {
-        let n = screens[screen].items.count
-        let new = max(0, min(n - 1, sel(screen) + d))
-        guard new != sel(screen) else { return }
+        let n = current.items.count
+        let new = max(0, min(n - 1, sel(depth) + d))
+        guard new != sel(depth) else { return }
         touched = Date()
         // like the iPod: the highlight and the list jump a row at a time, without any animation
         var t = Transaction(); t.disablesAnimations = true
-        withTransaction(t) {
-            selection[screen] = new
-            for k in selection.keys where k > screen { selection[k] = nil }     // the next lists follow this choice
-        }
+        withTransaction(t) { selection[depth] = new }
         click()
     }
 
-    private func go(_ d: Int) {
-        let target = screen + d
-        guard (0..<screens.count).contains(target) else { return }
+    /// Centre button: open the selected item's menu.
+    private func open() {
         touched = Date()
-        withAnimation(.snappy(duration: 0.3)) { screen = target }
+        guard let next = child(stack[depth], sel(depth)) else { return }
+        forward = true
+        selection[depth] = sel(depth)                          // keep the place to come back to
+        for k in selection.keys where k > depth { selection[k] = nil }
+        selection[depth + 1] = 0                               // like the iPod: a menu opens at its first item
+        withAnimation(.snappy(duration: 0.3)) { stack.append(next) }
+        click()
+    }
+
+    /// MENU: back to the menu above (the main menu stays).
+    private func back() {
+        touched = Date()
+        guard depth > 0 else { return }
+        forward = false
+        selection[depth] = nil
+        withAnimation(.snappy(duration: 0.3)) { _ = stack.removeLast() }
         click()
     }
 
@@ -331,13 +438,13 @@ struct IPodPreview: View {
                 .fill(dark ? Color(white: 0.18) : Color(white: 0.97))
                 .frame(width: size * 0.38)
                 .contentShape(Circle())
-                .onTapGesture { go(1) }
+                .onTapGesture { open() }
                 .overlay(Circle().strokeBorder(.black.opacity(0.08), lineWidth: 1))
                 .shadow(color: .black.opacity(0.08), radius: 1, y: 1)
             Group {
                 Text("MENU").font(.system(size: 9.5, weight: .bold))
                     .padding(8).contentShape(Rectangle())
-                    .onTapGesture { go(-1) }
+                    .onTapGesture { back() }
                     .offset(y: -size * 0.37)
                 Image(systemName: "backward.end.alt.fill").font(.system(size: 8)).offset(x: -size * 0.37)
                 Image(systemName: "forward.end.alt.fill").font(.system(size: 8)).offset(x: size * 0.37)
