@@ -159,7 +159,7 @@ sudo scripts/write_fw_5g.sh diskNs2                    # writes only the sectors
 
 An **iPod Video 5.5th gen** has the same firmware, but its disk uses 2048-byte sectors and a 160 MiB
 firmware partition. Use `--55g` and the `_55g` scripts (`backup_fw_55g.sh`, `write_fw_55g.sh`,
-`rollback_fw_55g.sh`); all the iPod Video tweaks are available. Not yet tested on a device.
+`rollback_fw_55g.sh`); all the iPod Video tweaks are available. Tested on a device.
 
 An **iPod nano (1st generation)** uses `--nano` and the `_nano` scripts (`backup_fw_nano.sh`,
 `write_fw_nano.sh`, `rollback_fw_nano.sh`): Labels, Composers, Producers, the volume limit and the boot
@@ -272,7 +272,7 @@ sectors that differ (all inside `osos`) and leaves the rest alone. Undo with
 (5G: `0x4600`) and `aupd` at `0xC3C800` (5G: `0xC3A400`). Their contents are byte-identical to the
 5G's: every osos offset above moves by `+0xA00`, the boot logo by `+0x2400` (`0xCFC208`). aupd's RC4
 key is hidden the same way, except that the sum runs over the whole 2048-byte security sector. Writes
-go in whole 2048-byte sectors.
+go in whole 2048-byte sectors. Tested on a device (all iPod Video tweaks).
 
 ### iPod photo / iPod color: `--photo`
 

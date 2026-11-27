@@ -10,8 +10,8 @@ This repo patches the Apple firmware of click-wheel iPods. It supports three mod
   160 MiB (167,772,160-byte) `Apple_MDFW` partition with **2048-byte sectors**: images start one 2048-byte
   sector after their directory offset (osos `0x5000`, aupd `0xC3C800`), the aupd RC4 sum runs over the
   whole 2048-byte security sector, and writes go in whole 2048-byte sectors. `--55g` (model `55g`),
-  scripts `backup_fw_55g.sh`, `write_fw_55g.sh`, `rollback_fw_55g.sh`; the app supports it. **Not yet
-  tested on a device** (checked on a backup of the user's 5.5G and on a file standing in for the disk).
+  scripts `backup_fw_55g.sh`, `write_fw_55g.sh`, `rollback_fw_55g.sh`; the app supports it. **Tested on a
+  device** (2026-11-27, all iPod Video tweaks).
 - **iPod nano 1st generation** (USB product 4618 / `0x120A`), one firmware build (`osos` 0x54EF30 bytes):
   `--nano` (model `nano`), scripts `backup_fw_nano.sh`, `write_fw_nano.sh`, `rollback_fw_nano.sh`; the
   app supports it. Labels, Composers, Producers, volume and the boot logo (the 5G's 62×78 logo in its
