@@ -53,13 +53,14 @@ enum IPodModel: String, CaseIterable, Identifiable, Codable {
 }
 
 enum PatchID: String, CaseIterable, Identifiable {
-    case labels, composers, producers, logo, dnd
+    case labels, composers, producers, logo, dnd, volume
     var id: String { rawValue }
     /// Offered for this model? The boot logo and the DnD picture exist for the iPod photo / color and the iPod Video.
     func available(on model: IPodModel?) -> Bool {
         switch self {
         case .logo: return model == .photo || model == .g5
         case .dnd: return model == .photo || model == .g5
+        case .volume: return model == .g5
         default: return true
         }
     }
@@ -80,6 +81,7 @@ enum PatchID: String, CaseIterable, Identifiable {
         case .producers: return "Composers → Producers"
         case .logo: return "Apple logo upside down"
         case .dnd: return "Own “Do not disconnect” picture"
+        case .volume: return "No volume limit"
         }
     }
     var flag: String { "--\(rawValue)" }
@@ -90,6 +92,7 @@ enum PatchID: String, CaseIterable, Identifiable {
         case .producers: return "slider.horizontal.3"
         case .logo: return "apple.logo"
         case .dnd: return "photo"
+        case .volume: return "speaker.wave.3"
         }
     }
     /// Plain-language wording for the main window.
@@ -100,6 +103,7 @@ enum PatchID: String, CaseIterable, Identifiable {
         case .producers: return "Rename Composers to Producers"
         case .logo: return "Flip the Apple logo upside down"
         case .dnd: return "Use your own “Do not disconnect” picture"
+        case .volume: return "Remove the volume limit"
         }
     }
     var plainBlurb: String {
@@ -109,6 +113,7 @@ enum PatchID: String, CaseIterable, Identifiable {
         case .producers: return "For people who keep the producer in the Composer field. The Composers menu is called Producers."
         case .logo: return "The Apple logo shown while the iPod starts up is upside down."
         case .dnd: return "Shown while the iPod is connected to the Mac. Turn it on to choose a 100×100 BMP picture."
+        case .volume: return "Lifts the built-in (European) maximum volume. Then raise Settings → Volume Limit. Loud music can damage your hearing."
         }
     }
     var shortName: String {
@@ -118,6 +123,7 @@ enum PatchID: String, CaseIterable, Identifiable {
         case .producers: return "Producers"
         case .logo: return "Upside-down logo"
         case .dnd: return "Own Do not disconnect picture"
+        case .volume: return "No volume limit"
         }
     }
     var blurb: String {
@@ -127,6 +133,7 @@ enum PatchID: String, CaseIterable, Identifiable {
         case .producers: return "Renames the English Composers menu to Producers (5 strings, same length)."
         case .logo: return "Flips the boot logo, or puts your own BMP there, in the encrypted aupd image (same size); the iPod copies it into its boot ROM at the next start."
         case .dnd: return "Replaces the 100×100 picture (iPodWizard index 97 on the iPod photo, 372 on the iPod Video) with your BMP; Apple's original is saved first so it can be put back."
+        case .volume: return "The volume-cap check (osos 0xA0348) always answers no: and r0, r0, #1 becomes #0 (2 bytes, checksum unchanged)."
         }
     }
 }

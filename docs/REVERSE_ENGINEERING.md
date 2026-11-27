@@ -252,6 +252,12 @@ Pictures are stored uncompressed inside `osos`, each with a small header followe
   patch leaves it alone). The aupd "flashed" flag
   is at `0x4258`. `write_fd.py` lets a write reach to the end of aupd (rsrc is only read back) and
   refuses anything at or beyond hibe. Tested on a device through Clickwheel in both directions.
+- **iPod Video volume limit (`--5g --volume`)**: from a community HxD guide (search
+  `08009fe5940090e5`, second hit, `01 00` → `00 01`). The hit is a getter at osos `0xA0348`:
+  `ldr r0, =0x108710DC; ldr r0, [r0, #0x94]; and r0, r0, #1; bx lr`, called from 2 places; bit 0 of
+  that flags word means "volume is capped". `00 01 00 E2` is `and r0, r0, #0` (immediate 0, rotation
+  1), so it always returns 0. The first hit (osos `0x9F0F8`) is a sibling getter `and r0, r0, #6` for
+  other flags. No getter with this byte pattern exists in the photo or 4G osos.
 - **aupd encryption = RC4 (`aupd_rc4_key`)**: every image starts with a 512-byte security block (the
   sector at the directory's devOffset, before the data); for aupd it hides a 4-byte RC4 key behind 8
   marker words at word offsets `0x5, 0x25, 0x6F, 0x69, 0x15, 0x4D, 0x40, 0x34` (BadBlox's method,

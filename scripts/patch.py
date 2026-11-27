@@ -23,6 +23,7 @@ Patches:
   --labels     rename the English "Genres" menu labels to "Labels" (5 strings)
   --composers  after picking a genre/label, show Composers instead of Artists (1 byte)
   --producers  rename the English "Composers" menu labels to "Producers" (5 strings)
+  --volume     iPod Video: remove the built-in volume limit (2 bytes)
   --dnd FILE   iPod photo and iPod Video: your own "Do not disconnect" picture (100x100 BMP; "keep" = keep the current one)
   --logo       iPod photo and iPod Video: the boot Apple logo upside down (in the encrypted aupd image)
   --logo-image FILE   iPod photo and iPod Video: your own boot logo (photo 78x100, Video 62x78 BMP;
@@ -107,6 +108,14 @@ MODELS = {
                                            'delta_sha256': 'c1921e6edd619643d1cb900b1f248b0d036a0af7832b716f9c743b23a07a83f3'},
                            'checksum': 0x426C},
                 'context': [],
+            },
+            'volume': {
+                # The getter behind the built-in (European) volume cap, osos 0xA0348, 2 callers:
+                #   ldr r0,=0x108710DC; ldr r0,[r0,#0x94]; and r0,r0,#1; bx lr
+                # 'and r0,r0,#1' (01 00 00 e2) -> 'and r0,r0,#0' (00 01 00 e2, 0 rotated): never capped.
+                'desc': 'No built-in volume limit (volume-cap check always answers "no")',
+                'edits': [(0xA4950, b'\x01\x00', b'\x00\x01')],
+                'context': [(0xA4948, bytes.fromhex('08009fe5' '940090e5'), 0xA4952, bytes.fromhex('00e2' '1eff2fe1' 'dc108710'))],
             },
             'dnd': {
                 # The "Do not disconnect" picture (iPodWizard index 372, ID 25561): 100x100 RGB565 in osos, with
@@ -450,6 +459,7 @@ def main():
     ap.add_argument('--labels', action='store_true', help='English "Genres" -> "Labels"')
     ap.add_argument('--composers', action='store_true', help='Genre/Label list opens Composers instead of Artists')
     ap.add_argument('--producers', action='store_true', help='English "Composers" -> "Producers"')
+    ap.add_argument('--volume', action='store_true', help='iPod Video: remove the built-in volume limit')
     ap.add_argument('--dnd', metavar='FILE.bmp',
                     help='iPod photo and iPod Video: your own "Do not disconnect" picture (100x100 BMP); "keep" keeps the one on the iPod')
     ap.add_argument('--originals', metavar='DIR',
@@ -486,7 +496,7 @@ def main():
         fail(f'--logo-image is not available for {m["name"]}')
     if a.logo_image and a.logo:
         fail('choose --logo (flip) or --logo-image (your own picture), not both')
-    for n in ('labels', 'composers', 'producers', 'logo', 'dnd'):
+    for n in ('labels', 'composers', 'producers', 'logo', 'dnd', 'volume'):
         if getattr(a, n) and n not in patches:
             fail(f'--{n} is not available for {m["name"]}')
     if a.find:

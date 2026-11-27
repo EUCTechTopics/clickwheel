@@ -34,6 +34,7 @@ All patches are tiny in-place byte changes, and you can pick any combination:
 | `--logo` | iPod photo / color and iPod Video: the boot Apple logo upside down (it lives in the `aupd` image; tested on both) | 15,600 / 9,552 bytes |
 | `--logo-image FILE.bmp` | iPod photo / color (78×100 BMP) and iPod Video (62×78 BMP, not yet tested on a device): your own boot logo instead of the flipped Apple. Apple's logo is saved first (`originals/`), so switching it off puts it back | 15,600 / 9,672 bytes |
 | `--dnd FILE.bmp` | iPod photo / color and iPod Video: your own *Do not disconnect* picture (100×100 BMP, 16- or 24-bit). Apple's original is saved next to the input (`originals/`) first, so switching it off puts it back | 20,000 bytes |
+| `--volume` | iPod Video: removes the built-in (European) volume limit; then raise Settings → Volume Limit. Not yet tested on a device. Loud music can damage your hearing | 2 bytes |
 
 The image checksum is recalculated in every case.
 
@@ -242,6 +243,7 @@ All three patches, for the 5G build whose `osos` image is `0x735A00` bytes
 | `--labels` | `0x4B5A04`, `0x4B6760`, `0x4B7FB6`, `0x4B8158`, `0x4B8818` | `Genres` | `Labels` |
 | `--composers` | `0x4BEEFA` | `69` | `4C` (genre handler #248 calls *open Composers* `0x104C` instead of *open Artists* `0x1069`) |
 | `--producers` | `0x4B5A0C`, `0x4B6744`, `0x4B7FA6`, `0x4B814C`, `0x4B884C` | `Composers` | `Producers` |
+| `--volume` | `0xA4950` | `01 00` | `00 01` (the volume-cap check `and r0, r0, #1` becomes `#0`: never capped; checksum unchanged) |
 
 Checksum with `--labels --composers`: `0x2C7C4881`. With all three: `0x2C7C486D` (at `0x421C`). The 5G partition also holds a
 hibernation image, so 5G images are written with `write_fw_5g.sh`, which writes only the 512-byte

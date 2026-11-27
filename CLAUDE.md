@@ -43,6 +43,11 @@ The patches, available on all models, are:
    original pixels (checked by sha256) to `originals/photo-dnd.bin` (Video: `5g-dnd.bin`) next to the input (in the app:
    `~/Library/Application Support/Clickwheel/<serial>/originals/`); switching it off needs that file.
    In the app, turning the switch on opens a file picker.
+6. `--volume` (**iPod Video only**, not yet tested on a device): removes the built-in (European)
+   volume limit. The volume-cap getter at osos `0xA0348` (`ldr r0,=0x108710DC; ldr r0,[r0,#0x94];
+   and r0,r0,#1; bx lr`) gets `and r0,r0,#0`: partition `0xA4950` `01 00` → `00 01` (from a community
+   HxD guide). The checksum doesn't change (two bytes swapped). After writing and a Menu + Select
+   restart, the user raises Settings → Volume Limit. Mention that loud music can damage hearing.
 
 The user typically just cloned the repo and says something like "patch my iPod". Walk them
 through the workflow below, one stage at a time. The user may not be technical. Explain each
@@ -156,7 +161,7 @@ Same workflow and the same rules, with these differences:
 - The scripts take the partition explicitly (no auto-detect), so confirm it first.
 - Back up: `! sudo scripts/backup_fw_5g.sh diskNs2` → `firmware/ipod5g_fw_backup.bin`.
 - Check / build: `python3 scripts/patch.py --5g --check`, then
-  `python3 scripts/patch.py --5g --labels --composers [--producers] [--logo]` → `firmware/ipod5g_fw_patched.bin`.
+  `python3 scripts/patch.py --5g --labels --composers [--producers] [--logo] [--volume]` → `firmware/ipod5g_fw_patched.bin`.
 - Write: `! sudo scripts/write_fw_5g.sh diskNs2`. It writes only the 512-byte sectors that differ
   (the partition also holds a hibernation image, which must be left alone).
 - Undo: `! sudo scripts/rollback_fw_5g.sh diskNs2`.
