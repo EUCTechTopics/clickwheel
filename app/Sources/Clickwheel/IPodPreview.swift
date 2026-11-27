@@ -392,7 +392,7 @@ struct PreviewColumn: View {
               let s = state.plan?.result_states?[p.rawValue] else { return nil }
         switch (p, s) {
         case (.logo, "applied"): return "Apple logo, upside down"
-        case (.logo, "custom"): return "Your own boot logo"
+        case (.logo, "custom"): return state.mirrored.contains(.logo) ? "Apple logo, mirrored" : "Your own boot logo"
         case (.logo, _): return "Apple's boot logo"
         case (.dnd, "applied"): return "Your own picture"
         default: return "Apple's picture"

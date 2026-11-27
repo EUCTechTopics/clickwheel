@@ -32,7 +32,7 @@ All patches are tiny in-place byte changes, and you can pick any combination:
 | `--composers` | Picking a label shows Composers instead of Artists | 1 byte |
 | `--producers` | *Composers* → *Producers* (English menus) | 5 strings |
 | `--logo` | iPod photo / color and iPod Video: the boot Apple logo upside down (it lives in the `aupd` image; tested on both) | 15,600 / 9,552 bytes |
-| `--logo-image FILE.bmp` | iPod photo / color (78×100 BMP) and iPod Video (62×78 BMP), both tested on a device: your own boot logo instead of the flipped Apple. Apple's logo is saved first (`originals/`), so switching it off puts it back | 15,600 / 9,672 bytes |
+| `--logo-image FILE.bmp` | iPod photo / color (78×100 BMP) and iPod Video (62×78 BMP), both tested on a device: your own boot logo instead of the flipped Apple. Apple's logo is saved first (`originals/`), so switching it off puts it back. `--logo-image mirror` puts Apple's logo on mirrored left-right instead (in the app: Command-click the switch) | 15,600 / 9,672 bytes |
 | `--dnd FILE.bmp` | iPod photo / color and iPod Video: your own *Do not disconnect* picture (100×100 BMP, 16- or 24-bit). Apple's original is saved next to the input (`originals/`) first, so switching it off puts it back | 20,000 bytes |
 | `--volume` | All models: removes the built-in (European) volume limit; then raise Settings → Volume Limit. Tested on a device on the iPod Video and the 4G; the photo is untested (needs a European unit: US iPods have no cap). Loud music can damage your hearing | 2 bytes |
 

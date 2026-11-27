@@ -24,10 +24,11 @@ The patches, available on all models, are:
      aupd and is adjusted by the change in the pixel sum. Apple's logo is saved to
      `originals/photo-logo.bin` before it is replaced, so it can be put back. Builds reproduce the
      iPodWizard flipped and custom dumps byte for byte (apart from the flag below). In the app,
-     Option-click on the logo switch picks the user's own BMP.
+     Option-click on the logo switch picks the user's own BMP. Easter egg: Command-click (or
+     `--logo-image mirror`) puts Apple's logo on mirrored left-right (a `custom` picture; both models; **tested on the iPod Video**).
    - **iPod Video**: aupd is RC4-encrypted with a 4-byte key hidden in its 512-byte security block
      (the sector before its data; `aupd_rc4_key` in `patch.py`). The logo is 62×78 RGB565 after a
-     `LoGo` header; the aupd checksum (`0x426C`) is the byte sum of the decrypted aupd. Same states and
+     28-byte `LoGo` header (partition `0xCF9E08`); the aupd checksum (`0x426C`) is the byte sum of the decrypted aupd. Same states and
      options as the photo: `--logo`, `--logo-image FILE.bmp` (62×78) or `keep`, Apple's logo saved to
      `originals/5g-logo.bin`. iPodWizard's flip (a few pixels 1 colour step off) counts as `applied`;
      `scripts/patchdata/5g_logo.xor` turns it back into Apple's exact logo. The flip and the own BMP

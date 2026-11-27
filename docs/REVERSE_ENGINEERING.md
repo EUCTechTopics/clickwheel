@@ -269,9 +269,13 @@ Pictures are stored uncompressed inside `osos`, each with a small header followe
   archived ipodlinux.org wiki page "Flash Decryption"). The RC4 stream starts at the first data byte.
   Checked: on the photo the derived key (`0xA305E474`) reproduces `photo_logo.key` exactly; on the
   Video (`0xDB3B26C9`) the decrypted aupd starts with ARM vectors and its byte sum is the stored
-  checksum. Video logo: aupd offset `0xBF9EC` holds a 24-byte header (`oGoL` = "LoGo" byte-reversed,
-  0, u16 height 78, u16 width 62, u16 row bytes 124, u16 52, 0, u32 length 9,672), pixels follow at
-  `0xBFA04` (partition `0xCF9E04`), RGB565 LE, top row first: a white apple on black. The earlier
+  checksum. Video logo: aupd offset `0xBF9EC` holds a 28-byte header (`oGoL` = "LoGo" byte-reversed,
+  0, u16 height 78, u16 width 62, u16 row bytes 124, u16 52, 0, u32 length 9,672, u32 0), pixels follow at
+  `0xBFA08` (partition `0xCF9E08`), RGB565 LE, top row first: a white apple on black. Until 2026-11-27
+  `patch.py` started 4 bytes early (24-byte header): pictures were shifted 2 pixels left and each row's
+  first 2 pixels landed at the end of the row above. The upside-down apple hid it (its edge columns are
+  black); the mirror showed a stray dot right of the apple, and iPodWizard's export of it matched our
+  data shifted by exactly 2 pixels. An old `originals/5g-logo.bin` (old layout) is still accepted. The earlier
   "not row-symmetric" result came from a wrong start offset (the top rows are black, so the diff
   started later) plus iPodWizard's 24-bit round trip, which moves 1,861 pixels by 1 colour step.
   `patch.py` accepts the key only when the header decrypts exactly and the decrypted byte sum equals

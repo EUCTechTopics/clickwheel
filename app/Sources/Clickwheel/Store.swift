@@ -34,6 +34,10 @@ final class AppState {
     var customPictures: [PatchID: URL] = [:]
     /// Changes switched on with your own picture (Option-click), as opposed to their normal effect.
     var ownPicture: Set<PatchID> = []
+    /// Easter egg (Command-click on the boot logo switch): Apple's logo mirrored left-right, not yet on the iPod.
+    var mirrored: Set<PatchID> = []
+    /// A new picture (a chosen file or the mirror) waits to be written.
+    func newPicture(_ p: PatchID) -> Bool { customPictures[p] != nil || mirrored.contains(p) }
     var plan: PatchReport?
     /// The boot logo and DnD picture as they will be after Apply (from the plan), for the preview.
     var previewPictures: [PatchID: NSImage] = [:]
@@ -217,7 +221,7 @@ final class AppState {
             let otherIPod = dev != nil && (dev?.serial != lastSerial || dev?.model != lastModel)
             device = dev
             if let dev {
-                if otherIPod && lastSerial != nil { check = nil; plan = nil; built = nil; flashed = nil; customPictures = [:]; ownPicture = []
+                if otherIPod && lastSerial != nil { check = nil; plan = nil; built = nil; flashed = nil; customPictures = [:]; ownPicture = []; mirrored = []
                     music = nil; musicFrom = nil }
                 lastSerial = dev.serial; lastModel = dev.model
                 await loadMusic()
@@ -349,7 +353,7 @@ final class AppState {
             // your own picture (e.g. a boot logo) is on: the switch shows on, with that picture kept; a
             // picture chosen but not yet written stays chosen (Apply re-reads the iPod before building)
             ownPicture = Set(patchIDs.filter { $0.ownPictureOptional(on: model)
-                && (ds.patches[$0.rawValue] == "custom" || customPictures[$0] != nil) })
+                && (ds.patches[$0.rawValue] == "custom" || newPicture($0)) })
             selected.formUnion(ownPicture)
         }
         await updatePlan()
@@ -402,7 +406,7 @@ final class AppState {
         ["--exact"] + patchIDs.filter { selected.contains($0) }.flatMap { p -> [String] in
             guard p.takesPicture || ownPicture.contains(p) else { return [p.flag] }
             // a newly chosen file, or keep the custom picture that's already on the iPod
-            return [p.pictureFlag, customPictures[p]?.path ?? "keep"]
+            return [p.pictureFlag, customPictures[p]?.path ?? (mirrored.contains(p) ? "mirror" : "keep")]
         }
     }
 
@@ -547,6 +551,9 @@ final class AppState {
     func apply() async {
         guard device != nil, current != nil, !working else { return }
         let wanted = selected
+        // Re-reading the iPod resets the switches to what's on it; keep the user's choice, including
+        // flip vs own picture (e.g. own picture/mirror on the iPod → flip selected must still write).
+        let wantedOwn = ownPicture
         begin([.prepare, .install, .verify])
         defer { end() }
         guard let auth = await authorize(read: true, write: true,
@@ -563,6 +570,7 @@ final class AppState {
         busy = "Reading your iPod"
         guard await readIntoLibrary(auth) else { await remount(); return }
         selected = wanted
+        ownPicture = wantedOwn
         guard check?.patchable == true else {
             await remount()
             alert = AlertInfo(title: "Clickwheel can't change this iPod",
@@ -591,6 +599,7 @@ final class AppState {
             if let lib = library { knownThisSession.insert(lib.path) }
             if to != p { remove(p) }
             customPictures = [:]
+            mirrored = []
             check = nil
             await runCheck()
             flashed = current
@@ -696,7 +705,7 @@ final class AppState {
 
     var selectionIsInstalled: Bool {
         guard let d = deviceState, !d.patches.isEmpty else { return false }
-        if patchIDs.contains(where: { selected.contains($0) && customPictures[$0] != nil }) { return false }
+        if patchIDs.contains(where: { selected.contains($0) && newPicture($0) }) { return false }
         return patchIDs.allSatisfy { d.patches[$0.rawValue] == selectionStates[$0.rawValue] }
     }
 
@@ -733,7 +742,7 @@ final class AppState {
     var selectionChanges: (add: [PatchID], remove: [PatchID])? {
         guard let d = deviceState, !d.patches.isEmpty else { return nil }
         let want = selectionStates
-        return (patchIDs.filter { selected.contains($0) && (d.patches[$0.rawValue] != want[$0.rawValue] || customPictures[$0] != nil) },
+        return (patchIDs.filter { selected.contains($0) && (d.patches[$0.rawValue] != want[$0.rawValue] || newPicture($0)) },
                 patchIDs.filter { !selected.contains($0) && ["applied", "custom"].contains(d.patches[$0.rawValue]) && !isCustom($0) })
     }
 }

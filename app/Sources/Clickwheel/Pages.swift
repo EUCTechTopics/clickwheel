@@ -241,7 +241,8 @@ struct ChangeRow: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if on && (patch.takesPicture || state.ownPicture.contains(patch)) {
                     HStack(spacing: 8) {
-                        Text(state.customPictures[patch].map { "New picture: \($0.lastPathComponent)" } ?? "Your picture is on the iPod.")
+                        Text(state.customPictures[patch].map { "New picture: \($0.lastPathComponent)" }
+                             ?? (state.mirrored.contains(patch) ? "Apple logo, mirrored left-right." : "Your picture is on the iPod."))
                             .font(.callout).foregroundStyle(.secondary)
                         Button("Choose Another…") { choose() }.controlSize(.small)
                     }
@@ -255,7 +256,12 @@ struct ChangeRow: View {
                 get: { on },
                 set: { v in
                     let option = NSEvent.modifierFlags.contains(.option)
+                    let command = NSEvent.modifierFlags.contains(.command)
                     withAnimation(.snappy(duration: 0.2)) { state.previewMode = patch.previewMode }
+                    if v && command && patch.ownPictureOptional(on: state.model) {
+                        mirror()       // easter egg: Apple's logo mirrored left-right
+                        return
+                    }
                     if v && (patch.takesPicture || (option && patch.ownPictureOptional(on: state.model))) {
                         choose()       // on = a picture was picked; cancelling leaves it off
                         return
@@ -264,6 +270,7 @@ struct ChangeRow: View {
                         if v { state.selected.insert(patch) } else { state.selected.remove(patch) }
                         state.customPictures[patch] = nil
                         state.ownPicture.remove(patch)
+                        state.mirrored.remove(patch)
                         state.flashed = nil
                     }
                     state.schedulePlan()
@@ -274,6 +281,18 @@ struct ChangeRow: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
+    }
+
+    /// Easter egg: switch the boot logo on as Apple's logo mirrored left-right (patch.py --logo-image mirror).
+    private func mirror() {
+        withAnimation(.snappy(duration: 0.2)) {
+            state.customPictures[patch] = nil
+            state.mirrored.insert(patch)
+            state.ownPicture.insert(patch)
+            state.selected.insert(patch)
+            state.flashed = nil
+        }
+        state.schedulePlan()
     }
 
     /// Ask for a BMP of the right size; on success the change is switched on with that file.
@@ -292,6 +311,7 @@ struct ChangeRow: View {
         }
         withAnimation(.snappy(duration: 0.2)) {
             state.customPictures[patch] = url
+            state.mirrored.remove(patch)
             state.previewMode = patch.previewMode
             if !patch.takesPicture { state.ownPicture.insert(patch) }
             state.selected.insert(patch)

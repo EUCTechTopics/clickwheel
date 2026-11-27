@@ -27,7 +27,7 @@ Patches:
   --dnd FILE   iPod photo and iPod Video: your own "Do not disconnect" picture (100x100 BMP; "keep" = keep the current one)
   --logo       iPod photo and iPod Video: the boot Apple logo upside down (in the encrypted aupd image)
   --logo-image FILE   iPod photo and iPod Video: your own boot logo (photo 78x100, Video 62x78 BMP;
-                      "keep" = keep the current one)
+                      "keep" = keep the current one, "mirror" = Apple's logo mirrored left-right)
 
 --exact: build exactly the selection. Patches that are named are applied; patches that are not named
 are put back to their original bytes (removed) if the input has them. Without --exact a build only
@@ -101,18 +101,20 @@ MODELS = {
             },
             'logo': {
                 # The 62x78 RGB565 boot logo (iPodWizard index 417) in the aupd image, which is RC4-encrypted
-                # with a key hidden in its security block (aupd_rc4_key). The pixels follow a 24-byte 'LoGo'
-                # header. The aupd checksum (directory field 0x426C) is the byte sum of the decrypted aupd.
+                # with a key hidden in its security block (aupd_rc4_key). The pixels follow a 28-byte 'LoGo'
+                # header (until 2026-11-27 patch.py read them 4 bytes early, which shifted pictures 2 pixels). The aupd checksum (directory field 0x426C) is the byte sum of the decrypted aupd.
                 'desc': 'Boot Apple logo (62x78, in aupd): upside down, or your own BMP',
-                'cipher': {'image': 'aupd', 'offset': 0xCF9E04, 'height': 78, 'width': 62, 'row_bytes': 124,
+                'cipher': {'image': 'aupd', 'offset': 0xCF9E08, 'height': 78, 'width': 62, 'row_bytes': 124,
                            'rc4': True,
-                           # 'LoGo' tag (byte-reversed), 0, height 78, width 62, row bytes 124, 52, 0, length 9672
-                           'header': bytes.fromhex('6f476f4c00000000' '4e003e00' '7c003400' '00000000' 'c8250000'),
-                           'stock_sha256': '2ed2994e187f559927c6c33d8a6b8bb919e3e1517b5ff22de89899f7b1fda6e7',
+                           # 'LoGo' tag (byte-reversed), 0, height 78, width 62, row bytes 124, 52, 0, length 9672, 0
+                           'header': bytes.fromhex('6f476f4c00000000' '4e003e00' '7c003400' '00000000' 'c8250000' '00000000'),
+                           'stock_sha256': 'bc6955e6d2ac92827ef2c89c1dcc7e308a0dfce0eb2abef7cecc05b438e1dfb7',
+                           # originals/5g-logo.bin saved with the old, 4-byte-early layout: still accepted
+                           'legacy_stock_sha256': '2ed2994e187f559927c6c33d8a6b8bb919e3e1517b5ff22de89899f7b1fda6e7',
                            # iPodWizard's flip (a 24-bit colour round trip shifts some pixels by 1 step): counts as
                            # 'applied'; XOR with this delta (pixel offset 0x58 onward) gives Apple's logo back
-                           'wizard_flip': {'sha256': 'c96ea87ba505fcea94a796f994d63fc6f2e538b131970e752fd9e5c5ac930820',
-                                           'delta': '5g_logo.xor', 'delta_offset': 0x58, 'delta_length': 9552,
+                           'wizard_flip': {'sha256': 'a3c19a0de2f70aad69ef3912b2c64832b5fdddfdb18d6f5ad6417db25cd464eb',
+                                           'delta': '5g_logo.xor', 'delta_offset': 0x54, 'delta_length': 9552,
                                            'delta_sha256': 'c1921e6edd619643d1cb900b1f248b0d036a0af7832b716f9c743b23a07a83f3'},
                            'checksum': 0x426C},
                 'context': [],
@@ -207,6 +209,15 @@ JSON = False
 
 def flip_rows(d, row_bytes, height):
     return b''.join(d[r * row_bytes:(r + 1) * row_bytes] for r in reversed(range(height)))
+
+def mirror_rows(d, row_bytes, height, width):
+    """Left-right mirror of 16-bit pixels (any row padding stays at the end of the row)."""
+    out = bytearray(d)
+    for r in range(height):
+        o = r * row_bytes
+        for c in range(width):
+            out[o + 2 * c:o + 2 * c + 2] = d[o + 2 * (width - 1 - c):o + 2 * (width - c)]
+    return bytes(out)
 
 def patchdata(name, size, sha):
     try:
@@ -511,7 +522,7 @@ def main():
                     help='where Apple\'s original pictures are saved before a custom one replaces them '
                          '(default: an "originals" folder next to the input)')
     ap.add_argument('--logo-image', metavar='FILE.bmp',
-                    help='iPod photo (78x100) and iPod Video (62x78): your own boot logo BMP instead of the flipped one; "keep" keeps the one on the iPod')
+                    help='iPod photo (78x100) and iPod Video (62x78): your own boot logo BMP instead of the flipped one; "keep" keeps the one on the iPod, "mirror" mirrors Apple\'s logo left-right')
     ap.add_argument('--logo', action='store_true', help='iPod photo and iPod Video: boot Apple logo upside down')
     ap.add_argument('--reflash', action='store_true',
                     help='iPod photo and iPod Video: mark aupd as not yet flashed, so the iPod copies it into its boot ROM at the next start')
@@ -637,6 +648,8 @@ def main():
                 stock_px = open(keep, 'rb').read()
             except OSError:
                 stock_px = None
+            if stock_px is not None and hashlib.sha256(stock_px).hexdigest() == x.get('legacy_stock_sha256'):
+                stock_px = stock_px[4:] + bytes(4)      # old layout: 4 bytes early (the last 2 pixels are black)
             if stock_px is not None and hashlib.sha256(stock_px).hexdigest() != x['stock_sha256']:
                 fail(f'patch "{n}": {keep} is not Apple\'s original picture')
         if states[n] in ('original', 'applied'):
@@ -650,6 +663,10 @@ def main():
             if states[n] != 'custom':
                 fail('--logo-image keep: the iPod has no own boot logo to keep')
             target = cur
+        elif a.logo_image == 'mirror':                 # easter egg: Apple's logo mirrored left-right
+            if stock_px is None:
+                fail(f'patch "{n}": Apple\'s original picture was not saved ({keep}); cannot mirror it')
+            target = mirror_rows(stock_px, x['row_bytes'], x['height'], x['width'])
         else:
             target = read_bmp(a.logo_image, x['width'], x['height'])
             h = hashlib.sha256(target).hexdigest()
@@ -711,7 +728,11 @@ def main():
     struct.pack_into('<I', buf, CHK_OFF, new_chk)
 
     # Verify: same size, only the intended bytes changed, checksum consistent.
-    diff = [i for i in range(len(orig)) if orig[i] != buf[i]]
+    diff = []                           # compare 64 KiB blocks first; only differing blocks byte by byte
+    B = 1 << 16
+    for blk in range(0, max(len(orig), len(buf)), B):
+        if orig[blk:blk + B] != buf[blk:blk + B]:
+            diff += [i for i in range(blk, min(blk + B, len(orig), len(buf))) if orig[i] != buf[i]]
     if len(buf) != m['part_size'] or not set(diff) <= allowed:
         fail('verification failed: unexpected bytes changed')
     if osos_info(bytes(buf), m)[2] != new_chk:
