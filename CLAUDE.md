@@ -210,6 +210,7 @@ If the user prefers the app, explain that, and don't run it to change anything f
 | `scripts/device_state.sh` | sudo, read-only: reads the firmware partition to a temp file and runs `patch.py --check` on it (which patches are on the iPod now); never writes |
 | `scripts/ipod_model.sh` | Read-only: `4g`, `5g`, `photo` or `unknown` for a partition (SysInfo, else size); the sudo scripts refuse a mismatch |
 | `scripts/same_model.py` | Read-only: refuses a full-partition write (4G) when the device holds a different model's firmware |
+| `scripts/library.py` | Read-only: summarises the mounted iPod's music (iTunesDB: genres/labels → composers/artists → albums) for the app's preview |
 | `app/` | Clickwheel, the macOS GUI (SwiftUI). `app/build_app.sh` builds `app/build/Clickwheel.app` |
 | `firmware/` | Firmware dumps and outputs. Git-ignored: contains Apple's firmware, never commit it. |
 | `docs/REVERSE_ENGINEERING.md` | How the patches were found; offsets and structures for extending them |

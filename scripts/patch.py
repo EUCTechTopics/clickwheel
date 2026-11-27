@@ -351,6 +351,35 @@ def read_bmp(path, width, height):
             out += struct.pack('<H', px)
     return bytes(out)
 
+def write_bmp(path, px, width, height, row_bytes):
+    """Save RGB565 LE pixels (top row first) as a 24-bit BMP, atomically (for the app's preview)."""
+    rb = (width * 3 + 3) // 4 * 4
+    rows = []
+    for r in range(height):
+        row = bytearray()
+        for x in range(width):
+            v = px[r * row_bytes + 2 * x] | px[r * row_bytes + 2 * x + 1] << 8
+            row += bytes(((v & 0x1F) * 255 // 31, (v >> 5 & 0x3F) * 255 // 63, (v >> 11) * 255 // 31))
+        rows.append(bytes(row) + bytes(rb - len(row)))
+    data = b''.join(reversed(rows))                     # BMP rows are bottom-up
+    hdr = b'BM' + struct.pack('<IHHI', 54 + len(data), 0, 0, 54) + \
+        struct.pack('<IiiHHIIiiII', 40, width, height, 1, 24, 0, len(data), 2835, 2835, 0, 0)
+    with open(path + '.tmp', 'wb') as f:
+        f.write(hdr + data)
+    os.replace(path + '.tmp', path)
+
+def result_picture(buf, p):
+    """(pixels, width, height, row_bytes) of a picture patch as it is in buf, or None."""
+    if 'picture' in p:
+        r = picture_region(buf, p)
+        f = p['picture']
+        return None if r is None else (bytes(buf[r[0]:r[0] + r[1]]), f['width'], f['height'], f['row_bytes'])
+    if 'cipher' in p:
+        x = p['cipher']
+        px = cipher_plain(buf, x)
+        return None if px is None else (px, x['width'], x['height'], x['row_bytes'])
+    return None
+
 def picture_region(buf, p):
     """(offset, length) of a 'picture' patch's pixels, or None when the header isn't the expected one."""
     f = p['picture']
@@ -475,6 +504,8 @@ def main():
     ap.add_argument('--check', action='store_true', help='only inspect the input and report')
     ap.add_argument('--plan', action='store_true', help='show exactly what would change, but write nothing')
     ap.add_argument('--json', action='store_true', help='machine-readable output (for the Clickwheel app)')
+    ap.add_argument('--preview', metavar='DIR',
+                    help='also save the pictures of the result (boot logo, DnD) as BMPs in DIR (for the app)')
     ap.add_argument('--find', metavar='TEXT', help='read-only: list every occurrence of TEXT in the osos image')
     a = ap.parse_args()
     JSON = a.json
@@ -676,8 +707,16 @@ def main():
         fail(f'verification failed: patch states after the build are {result}, expected {expect}')
     result_stock = (hashlib.sha256(buf[start:start + length]).hexdigest() == stock) if stock else None
 
+    previews = {}
+    if a.preview:                       # what the iPod will show: the decrypted pictures of the result
+        os.makedirs(a.preview, exist_ok=True)
+        for n, p in patches.items():
+            r = result_picture(bytes(buf), p)
+            if r:
+                previews[n] = os.path.join(a.preview, f'{n}.bmp')
+                write_bmp(previews[n], *r)
     sha = hashlib.sha256(buf).hexdigest()
-    report.update({'aupd_reflash': bool(flag) and buf[flag:flag + 4] == b'\0\0\0\0' and orig[flag:flag + 4] != b'\0\0\0\0',
+    report.update({'previews': previews,'aupd_reflash': bool(flag) and buf[flag:flag + 4] == b'\0\0\0\0' and orig[flag:flag + 4] != b'\0\0\0\0',
                    'applied': wanted, 'removed': removed, 'exact': a.exact, 'result_states': result,
                    'result_stock': result_stock, 'new_checksum': new_chk, 'plan': a.plan, 'output': None if a.plan else a.output,
                    'output_sha256': sha, 'sectors': sorted({i // 512 * 512 for i in diff}),

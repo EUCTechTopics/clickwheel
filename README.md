@@ -311,6 +311,7 @@ A Finder/iTunes **firmware update or restore** removes the patches. Just run the
 │   ├── ipod_model.sh         # read-only: which model is this partition?
 │   ├── device_state.sh       # sudo, read-only: which patches are on the iPod now?
 │   ├── same_model.py         # read-only: device and image are the same model (4G write)
+│   ├── library.py            # read-only: the iPod's music per label, for the app's preview
 │   └── write_sectors.py      # helper: write only the sectors that differ (5G, photo)
 ├── app/                      # Clickwheel.app (SwiftUI); build with app/build_app.sh
 ├── docs/REVERSE_ENGINEERING.md

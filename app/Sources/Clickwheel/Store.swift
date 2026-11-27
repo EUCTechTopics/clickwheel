@@ -35,6 +35,12 @@ final class AppState {
     /// Changes switched on with your own picture (Option-click), as opposed to their normal effect.
     var ownPicture: Set<PatchID> = []
     var plan: PatchReport?
+    /// The boot logo and DnD picture as they will be after Apply (from the plan), for the preview.
+    var previewPictures: [PatchID: NSImage] = [:]
+    var previewMode: PreviewMode = .menus
+    /// The iPod's own music (read-only from its iTunesDB), so the preview shows the user's labels.
+    var music: [LibraryReport.Genre]?
+    private var musicFrom: String?
     var built: PatchReport?
     /// The image just written and verified; nil again once the user changes a switch.
     var flashed: URL?
@@ -63,6 +69,8 @@ final class AppState {
             // stands in for the Library folder and holds ipod.bin.
             info("demo mode: simulated iPod, firmware folder \(demo)")
             demoLibrary = URL(fileURLWithPath: demo)
+            // CLICKWHEEL_DEMO_SCREEN=Startup|Connected opens that preview screen (for screenshots)
+            if let m = ProcessInfo.processInfo.environment["CLICKWHEEL_DEMO_SCREEN"].flatMap(PreviewMode.init(rawValue:)) { previewMode = m }
             device = Device(disk: "disk4", partition: "disk4s2", partitionSize: 33_554_432, volumeName: "Demo's iPod", mountPoint: "/Volumes/iPod",
                             sysInfo: ["BoardHwName": "iPod P98", "ModelNumStr": "MA079", "pszSerialNumber": "DEMO0000",
                                       "buildID": "0x04218000 (4.2.1)", "visibleBuildID": "0x01218000 (1.2.1)"],
@@ -209,8 +217,10 @@ final class AppState {
             let otherIPod = dev != nil && (dev?.serial != lastSerial || dev?.model != lastModel)
             device = dev
             if let dev {
-                if otherIPod && lastSerial != nil { check = nil; plan = nil; built = nil; flashed = nil; customPictures = [:]; ownPicture = [] }
+                if otherIPod && lastSerial != nil { check = nil; plan = nil; built = nil; flashed = nil; customPictures = [:]; ownPicture = []
+                    music = nil; musicFrom = nil }
                 lastSerial = dev.serial; lastModel = dev.model
+                await loadMusic()
             }
             await refreshFiles()
             if deviceState == nil && !working { selected = [] }
@@ -297,6 +307,19 @@ final class AppState {
         try? (how + "\n").write(to: c.appendingPathExtension("how"), atomically: true, encoding: .utf8)
     }
 
+    // MARK: the iPod's music (read-only, for the preview)
+
+    /// Read the library on the iPod's data volume once per mount; kept while it's unmounted for Apply.
+    private func loadMusic() async {
+        guard let repo, let mp = device?.mountPoint, mp != musicFrom else { return }
+        let r = await Runner.run("/usr/bin/env", ["python3", "-I", "scripts/library.py", mp, "--json"], cwd: repo)
+        guard let rep = try? JSONDecoder().decode(LibraryReport.self, from: Data(r.stdout.utf8)), rep.ok,
+              let g = rep.genres, !g.isEmpty else { return }
+        musicFrom = mp
+        music = g
+        info("read the iPod's music library for the preview: \(g.count) genres/labels")
+    }
+
     // MARK: patch.py (never touches the device)
 
     private func patchPy(_ args: [String]) async -> PatchReport? {
@@ -346,8 +369,16 @@ final class AppState {
     }
 
     func updatePlan() async {
-        guard let model, let c = current, check?.patchable == true else { plan = nil; return }
-        plan = await patchPy(["--model", model.rawValue, "-i", c.path, "--plan"] + selectionFlags)
+        guard let model, let c = current, let lib = library, check?.patchable == true else {
+            plan = nil; previewPictures = [:]; return
+        }
+        let dir = lib.appendingPathComponent("preview")
+        plan = await patchPy(["--model", model.rawValue, "-i", c.path, "--plan", "--preview", dir.path] + selectionFlags)
+        var pics: [PatchID: NSImage] = [:]
+        for (n, path) in plan?.previews ?? [:] {
+            if let p = PatchID(rawValue: n), let img = NSImage(contentsOfFile: path) { pics[p] = img }
+        }
+        previewPictures = pics
     }
 
     /// Build the selection from ipod.bin into a new file next to it.
@@ -519,7 +550,7 @@ final class AppState {
         begin([.prepare, .install, .verify])
         defer { end() }
         guard let auth = await authorize(read: true, write: true,
-                                          prompt: "Clickwheel wants to change your iPod's menus. Your music isn't touched.") else { return }
+                                          prompt: "Clickwheel wants to apply your tweaks to the iPod. Your music isn't touched.") else { return }
         guard await prepareDevice() else { return }
 
         if hasPending, let p = pending, let c = current {

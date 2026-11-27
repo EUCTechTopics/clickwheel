@@ -48,8 +48,18 @@ enum IPodModel: String, CaseIterable, Identifiable, Codable {
         }
     }
     var colorScreen: Bool { self != .g4 }
+    /// Screen height in pixels (to show pictures at their real size on the preview).
+    var screenHeight: CGFloat { self == .g5 ? 240 : self == .photo ? 176 : 128 }
     /// Tested on a real device by the project.
     var deviceTested: Bool { true }
+}
+
+/// What the iPod preview next to the switches shows.
+enum PreviewMode: String, CaseIterable, Identifiable {
+    case menus = "Menus", startup = "Startup", connected = "Connected"
+    var id: String { rawValue }
+    /// The change whose picture this screen shows.
+    var patch: PatchID? { self == .startup ? .logo : self == .connected ? .dnd : nil }
 }
 
 enum PatchID: String, CaseIterable, Identifiable {
@@ -66,6 +76,8 @@ enum PatchID: String, CaseIterable, Identifiable {
     }
     /// Turning it on asks for a picture file (a BMP of `pictureSize`).
     var takesPicture: Bool { self == .dnd }
+    /// The preview screen that shows this change.
+    var previewMode: PreviewMode { self == .logo ? .startup : self == .dnd ? .connected : .menus }
     /// Option-click on the switch uses your own picture instead (the boot logo on the iPod photo and Video).
     func ownPictureOptional(on model: IPodModel?) -> Bool { self == .logo && (model == .photo || model == .g5) }
     /// Size of the BMP this change takes: the boot logo is 78×100 on the iPod photo, 62×78 on the iPod Video.
@@ -185,6 +197,14 @@ struct Device: Equatable {
 
 // MARK: - patch.py --json reports
 
+/// scripts/library.py: the iPod's own music, per genre (= label), for the preview.
+struct LibraryReport: Decodable {
+    struct Person: Decodable, Equatable { let name: String; let albums: [String] }
+    struct Genre: Decodable, Equatable { let name: String; let songs: Int; let composers: [Person]; let artists: [Person] }
+    let ok: Bool
+    let genres: [Genre]?
+}
+
 struct PatchReport: Decodable {
     struct Osos: Decodable { let offset: Int; let length: Int; let checksum: UInt32; let stock: Bool? }
     struct Edit: Decodable { let offset: Int; let old: String; let new: String }
@@ -214,6 +234,8 @@ struct PatchReport: Decodable {
     let output_sha256: String?
     let sectors: [Int]?
     let changes: [Change]?
+    /// Pictures of the result (boot logo, DnD) as BMP files, from `--preview`.
+    let previews: [String: String]?
 }
 
 extension Data {

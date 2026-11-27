@@ -255,6 +255,7 @@ struct ChangeRow: View {
                 get: { on },
                 set: { v in
                     let option = NSEvent.modifierFlags.contains(.option)
+                    withAnimation(.snappy(duration: 0.2)) { state.previewMode = patch.previewMode }
                     if v && (patch.takesPicture || (option && patch.ownPictureOptional(on: state.model))) {
                         choose()       // on = a picture was picked; cancelling leaves it off
                         return
@@ -291,6 +292,7 @@ struct ChangeRow: View {
         }
         withAnimation(.snappy(duration: 0.2)) {
             state.customPictures[patch] = url
+            state.previewMode = patch.previewMode
             if !patch.takesPicture { state.ownPicture.insert(patch) }
             state.selected.insert(patch)
             state.flashed = nil
@@ -331,7 +333,7 @@ struct ActionBar: View {
         }
         .background(.bar)
         .confirmationDialog(confirmTitle, isPresented: $confirm) {
-            Button(state.selected.isEmpty ? "Restore Original Menus" : "Apply") { Task { await state.apply() } }
+            Button(state.selected.isEmpty ? "Remove All Tweaks" : "Apply") { Task { await state.apply() } }
         } message: {
             Text(confirmMessage)
         }
@@ -339,7 +341,7 @@ struct ActionBar: View {
 
     private var confirmTitle: String {
         let name = state.device?.volumeName.map { "“\($0)”" } ?? "your iPod"
-        return state.selected.isEmpty ? "Put the original menus back on \(name)?" : "Change the menus on \(name)?"
+        return state.selected.isEmpty ? "Remove all tweaks from \(name)?" : "Apply your tweaks to \(name)?"
     }
     private var confirmMessage: String {
         "macOS asks for your Mac password. Keep the iPod connected until Clickwheel is done. Your music isn't touched."
@@ -396,7 +398,7 @@ struct ActionBar: View {
         HStack(spacing: 14) {
             Image(systemName: "checkmark.circle.fill").font(.system(size: 30)).foregroundStyle(Theme.phosphor)
             VStack(alignment: .leading, spacing: 3) {
-                Text("Done. Your iPod has the new menus.").font(.headline)
+                Text(state.selected.isEmpty ? "Done. Your iPod has Apple's original software again." : "Done. Your tweaks are on the iPod.").font(.headline)
                 Text("Eject it to finish. It then restarts by itself.")
                     .font(.callout).foregroundStyle(.secondary)
             }

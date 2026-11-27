@@ -5,6 +5,11 @@ struct IPodPreview: View {
     var model: IPodModel?
     var patches: Set<PatchID>
     var patched: Bool
+    /// Menus, or the boot logo / "Do not disconnect" picture as they will be.
+    var mode: PreviewMode = .menus
+    var picture: NSImage?
+    /// The iPod's own music; examples are used when it can't be read.
+    var music: [LibraryReport.Genre]?
 
     @State private var screen = 0
     @State private var bodyDark = false
@@ -21,21 +26,94 @@ struct IPodPreview: View {
     private var drillsToComposers: Bool { patched && patches.contains(.composers) }
 
     struct Screen { let title: String; let items: [String]; let sel: Int }
+    /// Rows the screen shows at once; longer lists scroll with the selection.
+    static let rows = 6
+
+    /// Example music when the iPod's own library isn't available.
+    private static let examples: [LibraryReport.Genre] = {
+        typealias P = LibraryReport.Person
+        return [
+            .init(name: "Ninja Tune", songs: 40,
+                  composers: [P(name: "Simon Green", albums: ["Fragments", "Migration", "The North Borders", "Black Sands"]),
+                              P(name: "Jason Swinscoe", albums: ["To Believe", "Ma Fleur"]),
+                              P(name: "Jordan Rakei", albums: ["Origin", "Wallflower"]),
+                              P(name: "Thomas Fehlmann", albums: ["Gute Luft"])],
+                  artists: [P(name: "Bonobo", albums: ["Fragments", "Migration", "The North Borders", "Black Sands"]),
+                            P(name: "The Cinematic Orchestra", albums: ["To Believe", "Ma Fleur"]),
+                            P(name: "Jordan Rakei", albums: ["Origin", "Wallflower"]),
+                            P(name: "Bonobo feat. Jamila Woods", albums: ["Fragments"])]),
+            .init(name: "Rough Trade", songs: 30, composers: [], artists: []),
+            .init(name: "Sub Pop", songs: 20, composers: [], artists: []),
+            .init(name: "XL Recordings", songs: 10, composers: [], artists: []),
+        ]
+    }()
+
+    // The walk follows the wheel: each list is built from what's selected on the screen before it.
+    /// Sorted like the iPod: case-insensitive, ignoring a leading "The ".
+    private static func sortKey(_ s: String) -> String {
+        let l = s.lowercased()
+        return l.hasPrefix("the ") ? String(l.dropFirst(4)) : l
+    }
+    private static func sorted(_ a: [String]) -> [String] {
+        a.sorted { sortKey($0).localizedStandardCompare(sortKey($1)) == .orderedAscending }
+    }
+
+    private var labels: [LibraryReport.Genre] {
+        let all = (music?.isEmpty == false) ? music! : Self.examples
+        let order = Self.sorted(all.map(\.name))
+        return all.sorted { order.firstIndex(of: $0.name)! < order.firstIndex(of: $1.name)! }
+    }
+    /// Default label for the autoplay: the biggest one with several composers.
+    private var defaultLabel: Int {
+        let ls = labels
+        let best = ls.filter { $0.composers.count >= 2 && !$0.artists.isEmpty }.max { $0.songs < $1.songs }
+            ?? ls.max { $0.songs < $1.songs }
+        return best.flatMap { b in ls.firstIndex { $0.name == b.name } } ?? 0
+    }
+    private var labelRow: Int { selection[1] ?? defaultLabel + 1 }          // 0 = All
+    private var people: [LibraryReport.Person] {
+        let gs = labelRow == 0 ? labels : [labels[min(labelRow - 1, labels.count - 1)]]
+        var merged: [(name: String, albums: [String])] = []
+        for g in gs {
+            for p in drillsToComposers ? g.composers : g.artists {
+                if let i = merged.firstIndex(where: { $0.name == p.name }) {
+                    merged[i].albums += p.albums.filter { !merged[i].albums.contains($0) }
+                } else {
+                    merged.append((p.name, p.albums))
+                }
+            }
+        }
+        let order = Self.sorted(merged.map(\.name))
+        return merged.sorted { order.firstIndex(of: $0.name)! < order.firstIndex(of: $1.name)! }
+            .map { LibraryReport.Person(name: $0.name, albums: Self.sorted($0.albums)) }
+    }
+    private var defaultPerson: Int {
+        let ps = people
+        return ps.indices.max { ps[$0].albums.count < ps[$1].albums.count } ?? 0
+    }
+    private var personRow: Int { selection[2] ?? (people.isEmpty ? 0 : defaultPerson + 1) }
+    private var albums: [String] {
+        let ps = people
+        if ps.isEmpty { return [] }
+        if personRow == 0 { return Self.sorted(Array(Set(ps.flatMap(\.albums)))) }
+        return ps[min(personRow - 1, ps.count - 1)].albums
+    }
 
     private var screens: [Screen] {
-        let second = drillsToComposers
-            ? ["All", "Aphex Twin", "Boards of Canada", "Squarepusher", "Plaid"]
-            : ["All", "Aphex Twin", "Boards of Canada", "Squarepusher feat. …", "Plaid & Mira Calix"]
+        let ls = labels, ps = people, al = albums
         return [
             Screen(title: "Music", items: ["Playlists", "Artists", "Albums", "Songs", genre, composer], sel: 4),
-            Screen(title: genre, items: ["All", "Blue Note", "ECM", "Warp", "XL Recordings"], sel: 3),
-            Screen(title: "Warp", items: second, sel: 2),
-            Screen(title: "Boards of Canada", items: ["All", "Geogaddi", "Music Has the Right…", "Tomorrow's Harvest"], sel: 1),
+            Screen(title: genre, items: ["All"] + ls.map(\.name), sel: defaultLabel + 1),
+            Screen(title: labelRow == 0 ? genre : ls[min(labelRow - 1, ls.count - 1)].name,
+                   items: ["All"] + ps.map(\.name), sel: ps.isEmpty ? 0 : defaultPerson + 1),
+            Screen(title: personRow == 0 || ps.isEmpty ? (drillsToComposers ? composer : "Artists") : ps[min(personRow - 1, ps.count - 1)].name,
+                   items: ["All"] + al, sel: al.isEmpty ? 0 : 1),
         ]
     }
 
+    /// The browse path, without the example label the screens open.
     var path: [String] {
-        ["Music", genre, "Warp", drillsToComposers ? composer : "Artists", "Albums"]
+        ["Music", genre, drillsToComposers ? composer : "Artists", "Albums"]
     }
 
     var body: some View {
@@ -44,11 +122,32 @@ struct IPodPreview: View {
                 .frame(width: 210, height: 340)
                 .shadow(color: .black.opacity(0.25), radius: 18, y: 10)
             // breadcrumb of the browse path
+            if mode == .menus { breadcrumb }
+        }
+        // Switching a change keeps the place in the walk, so the difference shows where you are.
+        .onChange(of: drillsToComposers) {
+            touched = Date()                                     // hold the autoplay a moment
+            withAnimation(.easeInOut(duration: 0.2)) {
+                for k in selection.keys where k >= 2 { selection[k] = nil }   // artists <-> composers
+                if screen > 2 { screen = 2 }                     // that person may not be in the other list
+            }
+        }
+        .onChange(of: patches) { touched = Date() }
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1.9))
+                guard mode == .menus, Date().timeIntervalSince(touched) > 8 else { continue }  // the user is driving
+                withAnimation(.snappy(duration: 0.35)) { screen = (screen + 1) % 4; selection = [:] }
+            }
+        }
+    }
+
+    private var breadcrumb: some View {
             HStack(spacing: 4) {
                 ForEach(Array(path.enumerated()), id: \.offset) { i, p in
                     if i > 0 { Image(systemName: "chevron.right").font(.system(size: 7, weight: .bold)).foregroundStyle(.tertiary) }
                     Text(p)
-                        .foregroundStyle(i == min(screen + 1, path.count - 1) ? Color.primary : .secondary)
+                        .foregroundStyle(i == [1, 1, 2, 3][screen] ? Color.primary : .secondary)
                         .fontWeight(highlight(p) ? .bold : .regular)
                         .foregroundStyle(highlight(p) ? Theme.phosphor : .secondary)
                 }
@@ -56,16 +155,6 @@ struct IPodPreview: View {
             .font(Theme.monoTiny)
             .lineLimit(1)
             .minimumScaleFactor(0.7)
-        }
-        .task(id: "\(patched)|\(patches.map(\.rawValue).sorted())") {
-            screen = 0
-            selection = [:]
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1.9))
-                guard Date().timeIntervalSince(touched) > 8 else { continue }  // the user is driving
-                withAnimation(.snappy(duration: 0.35)) { screen = (screen + 1) % 4; selection = [:] }
-            }
-        }
     }
 
     private func highlight(_ p: String) -> Bool {
@@ -99,7 +188,42 @@ struct IPodPreview: View {
         .onTapGesture { if model == .g5 { withAnimation { bodyDark.toggle() } } }
     }
 
-    private var lcd: some View {
+    @ViewBuilder private var lcd: some View {
+        switch mode {
+        case .menus: menuLCD
+        case .startup: pictureLCD(background: .black, text: nil)
+        case .connected: pictureLCD(background: .white, text: "Do not disconnect.")
+        }
+    }
+
+    /// A picture at its real size on the iPod's screen (scaled with the screen), e.g. the boot logo.
+    private func pictureLCD(background: Color, text: String?) -> some View {
+        GeometryReader { g in
+            let scale = g.size.height / (model?.screenHeight ?? 240)
+            ZStack {
+                background
+                if let img = picture, let rep = img.representations.first {
+                    VStack(spacing: 8 * scale) {
+                        Image(nsImage: img)
+                            .resizable()
+                            .interpolation(.none)
+                            .frame(width: CGFloat(rep.pixelsWide) * scale, height: CGFloat(rep.pixelsHigh) * scale)
+                        if let text {
+                            Text(text).font(.system(size: 15 * scale, weight: .semibold)).foregroundStyle(.black)
+                        }
+                    }
+                } else {
+                    Text("Connect your iPod to see this picture")
+                        .font(.system(size: 9)).multilineTextAlignment(.center)
+                        .foregroundStyle(background == .black ? Color(white: 0.6) : .gray)
+                        .padding(10)
+                }
+            }
+        }
+        .transition(.opacity)
+    }
+
+    private var menuLCD: some View {
         let color = model?.colorScreen ?? true
         let s = screens[screen]
         return ZStack(alignment: .top) {
@@ -123,11 +247,12 @@ struct IPodPreview: View {
                 Rectangle().fill(.black.opacity(color ? 0.25 : 0.7)).frame(height: color ? 0.5 : 1)
                 // rows
                 VStack(spacing: 0) {
-                    ForEach(Array(s.items.enumerated()), id: \.offset) { i, item in
+                    let first = max(0, min(sel(screen) - (Self.rows - 1), s.items.count - Self.rows))
+                    ForEach(Array(s.items.enumerated()).filter { $0.offset >= first && $0.offset < first + Self.rows }, id: \.offset) { i, item in
                         HStack {
                             Text(item).font(.system(size: 10.5, weight: i == sel(screen) ? .semibold : .regular)).lineLimit(1)
                             Spacer()
-                            if s.title == "Music" || i > 0 || s.title != "Boards of Canada" {
+                            if screen < 3 || i > 0 {
                                 Image(systemName: "chevron.right").font(.system(size: 7, weight: .heavy))
                             }
                         }
@@ -161,7 +286,12 @@ struct IPodPreview: View {
         let new = max(0, min(n - 1, sel(screen) + d))
         guard new != sel(screen) else { return }
         touched = Date()
-        withAnimation(.easeOut(duration: 0.08)) { selection[screen] = new }
+        // like the iPod: the highlight and the list jump a row at a time, without any animation
+        var t = Transaction(); t.disablesAnimations = true
+        withTransaction(t) {
+            selection[screen] = new
+            for k in selection.keys where k > screen { selection[k] = nil }     // the next lists follow this choice
+        }
         click()
     }
 
@@ -227,14 +357,45 @@ struct PreviewColumn: View {
     @Environment(AppState.self) private var state
 
     var body: some View {
-        VStack {
+        @Bindable var state = state
+        let modes = PreviewMode.allCases.filter { $0.patch.map { state.patchIDs.contains($0) } ?? true }
+        VStack(spacing: 16) {
             Spacer(minLength: 20)
-            IPodPreview(model: state.model, patches: state.selected, patched: !state.selected.isEmpty)
-                .help("Try it: drag around the wheel, click the centre button, press MENU to go back.")
+            if modes.count > 1 {
+                Picker("Show", selection: $state.previewMode) {
+                    ForEach(modes) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 230)
+            }
+            IPodPreview(model: state.model, patches: state.selected, patched: !state.selected.isEmpty,
+                        mode: modes.contains(state.previewMode) ? state.previewMode : .menus,
+                        picture: state.previewMode.patch.flatMap { state.previewPictures[$0] },
+                        music: state.music)
+                .help(state.previewMode == .menus
+                      ? "Try it: drag around the wheel, click the centre button, press MENU to go back."
+                      : "How the iPod will look after Apply.")
+            if let caption {
+                Text(caption).font(.callout).foregroundStyle(.secondary)
+            }
             Spacer(minLength: 20)
         }
         .padding(.horizontal, 14)
         .frame(maxHeight: .infinity)
         .background(.background.secondary)
+    }
+
+    /// What the picture screen shows, from the plan's result.
+    private var caption: String? {
+        guard let p = state.previewMode.patch, state.previewPictures[p] != nil,
+              let s = state.plan?.result_states?[p.rawValue] else { return nil }
+        switch (p, s) {
+        case (.logo, "applied"): return "Apple logo, upside down"
+        case (.logo, "custom"): return "Your own boot logo"
+        case (.logo, _): return "Apple's boot logo"
+        case (.dnd, "applied"): return "Your own picture"
+        default: return "Apple's picture"
+        }
     }
 }
