@@ -10,10 +10,11 @@ aupd turned out to be RC4 with the key in its security block, so no iPodWizard d
 (see `docs/REVERSE_ENGINEERING.md`). `--5g --logo-image FILE.bmp` (62×78) and Option-click in the
 app are built and checked on copies (2026-11-27). Left: test on the device, then mark it tested.
 
-## 2. Remove the volume limit on the iPod Video (5th gen): built, device test pending
+## 2. Remove the volume limit on the iPod Video (5th gen): done, tested on a device
 
-**Built 2026-11-27:** `--5g --volume` and the app switch, checked on copies (2 bytes change, the
-checksum stays the same, off again gives the input byte for byte). Left: plan step 4 on the device.
+**Done 2026-11-27:** `--5g --volume` and the app switch, checked on copies (2 bytes change, the
+checksum stays the same, off again gives the input byte for byte) and tested on the user's iPod
+Video: the volume limit is gone.
 
 **Goal:** `python3 scripts/patch.py --5g --volume` and a switch in the app: the iPod's built-in
 maximum volume limit (the European one) is switched off, so Settings → Volume Limit can go to the

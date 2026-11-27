@@ -43,7 +43,7 @@ The patches, available on all models, are:
    original pixels (checked by sha256) to `originals/photo-dnd.bin` (Video: `5g-dnd.bin`) next to the input (in the app:
    `~/Library/Application Support/Clickwheel/<serial>/originals/`); switching it off needs that file.
    In the app, turning the switch on opens a file picker.
-6. `--volume` (**iPod Video only**, not yet tested on a device): removes the built-in (European)
+6. `--volume` (**iPod Video only**, **tested on a device**): removes the built-in (European)
    volume limit. The volume-cap getter at osos `0xA0348` (`ldr r0,=0x108710DC; ldr r0,[r0,#0x94];
    and r0,r0,#1; bx lr`) gets `and r0,r0,#0`: partition `0xA4950` `01 00` → `00 01` (from a community
    HxD guide). The checksum doesn't change (two bytes swapped). After writing and a Menu + Select
