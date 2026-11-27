@@ -34,7 +34,7 @@ All patches are tiny in-place byte changes, and you can pick any combination:
 | `--logo` | iPod photo / color and iPod Video: the boot Apple logo upside down (it lives in the `aupd` image; tested on both) | 15,600 / 9,552 bytes |
 | `--logo-image FILE.bmp` | iPod photo / color (78×100 BMP) and iPod Video (62×78 BMP, not yet tested on a device): your own boot logo instead of the flipped Apple. Apple's logo is saved first (`originals/`), so switching it off puts it back | 15,600 / 9,672 bytes |
 | `--dnd FILE.bmp` | iPod photo / color and iPod Video: your own *Do not disconnect* picture (100×100 BMP, 16- or 24-bit). Apple's original is saved next to the input (`originals/`) first, so switching it off puts it back | 20,000 bytes |
-| `--volume` | iPod Video: removes the built-in (European) volume limit; then raise Settings → Volume Limit. Tested on a device. Loud music can damage your hearing | 2 bytes |
+| `--volume` | All models: removes the built-in (European) volume limit; then raise Settings → Volume Limit. Tested on a device on the iPod Video and the 4G, not yet on the photo. Loud music can damage your hearing | 2 bytes |
 
 The image checksum is recalculated in every case.
 
@@ -66,7 +66,7 @@ On all models:
 | Format | **Mac-formatted** iPod (has an `Apple_MDFW` firmware partition). Windows-formatted iPods aren't supported. |
 | Host | macOS with `zsh` and Python 3 (standard library only) |
 | Menu language | **English**. Other languages are left as they are. |
-| Patches | All three (`--labels`, `--composers`, `--producers`), in any combination |
+| Patches | `--labels`, `--composers`, `--producers` and `--volume`, in any combination (plus pictures on the photo and Video) |
 
 The patcher checks the firmware's **content**: structure, image size, checksum, and the exact
 original bytes plus surrounding context at every patch location. On anything else (another
@@ -220,6 +220,13 @@ partition. The `osos` image (the main OS) starts at `0x4600`.
 | `0x1B977C` | Main-menu item list |
 | `0x1B9B70` | Shuffle / settings list |
 
+### `--volume`: no built-in volume limit
+
+`0x7DFF0`: `01 00` → `00 01`. The volume-cap check (osos `0x799E8`) reads a flag that makes the
+player's maximum volume 216 instead of 256; `and r0, r0, #1` becomes `and r0, r0, #0`, so it is
+never capped. Two bytes swap places, so the checksum doesn't change. Only European iPods have the
+flag set; on others the patch changes nothing you can hear. Tested on a device.
+
 ### Checksum
 
 The `osos` checksum (32-bit sum of the image bytes) at **`0x421C`** is recalculated. Each
@@ -260,6 +267,7 @@ Offsets are into the 32 MiB partition:
 | `--labels` | `0x27176C`, `0x271D88`, `0x2735E2`, `0x2737C4`, `0x273DA0` | `Genres` | `Labels` |
 | `--composers` | `0x27A088` | `EC` | `D1` (genre handler #281 calls *open Composers* `0x9D1` instead of *open Artists* `0x9EC`) |
 | `--producers` | `0x271774`, `0x271D6C`, `0x2735D2`, `0x2737B8`, `0x273DD4` | `Composers` | `Producers` |
+| `--volume` | `0x87880` | `01 00` | `00 01` (the volume-cap check `and r0, r0, #1` becomes `#0`: never capped; checksum unchanged) |
 
 Checksums: `--labels` `0x1DE43E70`, `--composers` `0x1DE43EAA`, `--labels --composers`
 `0x1DE43E55`, all three `0x1DE43E41`. These offsets were found in Apple's own 1.2.1 updater image; all three

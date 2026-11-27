@@ -23,7 +23,7 @@ Patches:
   --labels     rename the English "Genres" menu labels to "Labels" (5 strings)
   --composers  after picking a genre/label, show Composers instead of Artists (1 byte)
   --producers  rename the English "Composers" menu labels to "Producers" (5 strings)
-  --volume     iPod Video: remove the built-in volume limit (2 bytes)
+  --volume     remove the built-in (European) volume limit (2 bytes)
   --dnd FILE   iPod photo and iPod Video: your own "Do not disconnect" picture (100x100 BMP; "keep" = keep the current one)
   --logo       iPod photo and iPod Video: the boot Apple logo upside down (in the encrypted aupd image)
   --logo-image FILE   iPod photo and iPod Video: your own boot logo (photo 78x100, Video 62x78 BMP;
@@ -65,6 +65,14 @@ MODELS = {
                 'desc': 'English "Composers" -> "Producers" (5 menu strings)',
                 'edits': [(o, b'Composers', b'Producers') for o in (0x1B7C44, 0x1B822C, 0x1B95E6, 0x1B977C, 0x1B9B70)],
                 'context': [],
+            },
+            'volume': {
+                # Volume-cap check at osos 0x799E8 (1 caller, which sets the max volume: capped 216, else 256):
+                #   ldr r0,=0x1039DA34; ldr r0,[r0,#0x138]; and r0,r0,#1; mov pc,lr
+                # 'and r0,r0,#1' (01 00 00 e2) -> 'and r0,r0,#0' (00 01 00 e2): never capped.
+                'desc': 'No built-in volume limit (volume-cap check always answers "no")',
+                'edits': [(0x7DFF0, b'\x01\x00', b'\x00\x01')],
+                'context': [(0x7DFE8, bytes.fromhex('08009fe5' '380190e5'), 0x7DFF2, bytes.fromhex('00e2' '0ef0a0e1' '34da3910'))],
             },
         },
     },
@@ -157,6 +165,14 @@ MODELS = {
                 'desc': 'English "Composers" -> "Producers" (5 menu strings)',
                 'edits': [(o, b'Composers', b'Producers') for o in (0x271774, 0x271D6C, 0x2735D2, 0x2737B8, 0x273DD4)],
                 'context': [],
+            },
+            'volume': {
+                # Volume-cap check at osos 0x83278 (1 caller, which sets the max volume: capped 216, else 256):
+                #   ldr r0,=0x1053C3B4; ldr r0,[r0,#0x138]; and r0,r0,#1; mov pc,lr
+                # 'and r0,r0,#1' (01 00 00 e2) -> 'and r0,r0,#0' (00 01 00 e2): never capped.
+                'desc': 'No built-in volume limit (volume-cap check always answers "no")',
+                'edits': [(0x87880, b'\x01\x00', b'\x00\x01')],
+                'context': [(0x87878, bytes.fromhex('08009fe5' '380190e5'), 0x87882, bytes.fromhex('00e2' '0ef0a0e1' 'b4c35310'))],
             },
             'dnd': {
                 # The "Do not disconnect" picture (iPodWizard index 97, ID 13115): 100x100 RGB565 in osos,
@@ -488,7 +504,7 @@ def main():
     ap.add_argument('--labels', action='store_true', help='English "Genres" -> "Labels"')
     ap.add_argument('--composers', action='store_true', help='Genre/Label list opens Composers instead of Artists')
     ap.add_argument('--producers', action='store_true', help='English "Composers" -> "Producers"')
-    ap.add_argument('--volume', action='store_true', help='iPod Video: remove the built-in volume limit')
+    ap.add_argument('--volume', action='store_true', help='remove the built-in (European) volume limit')
     ap.add_argument('--dnd', metavar='FILE.bmp',
                     help='iPod photo and iPod Video: your own "Do not disconnect" picture (100x100 BMP); "keep" keeps the one on the iPod')
     ap.add_argument('--originals', metavar='DIR',

@@ -257,7 +257,12 @@ Pictures are stored uncompressed inside `osos`, each with a small header followe
   `ldr r0, =0x108710DC; ldr r0, [r0, #0x94]; and r0, r0, #1; bx lr`, called from 2 places; bit 0 of
   that flags word means "volume is capped". `00 01 00 E2` is `and r0, r0, #0` (immediate 0, rotation
   1), so it always returns 0. The first hit (osos `0x9F0F8`) is a sibling getter `and r0, r0, #6` for
-  other flags. No getter with this byte pattern exists in the photo or 4G osos.
+  other flags. Its caller sets the player's maximum volume: `moveq r0, #256` / `movne r0, #216`.
+  The 4G and photo have the same code, compiled for ARMv4 (`mov pc, lr` instead of `bx lr`, and 256
+  encoded as `#64, ror 30`), so the guide's byte pattern doesn't find it: getter
+  `ldr r0, [pc]; ldr r0, [r0, #0x138]; and r0, r0, #1; mov pc, lr` at osos `0x799E8` (4G, object
+  `0x1039DA34`) and `0x83278` (photo, object `0x1053C3B4`, with an `and #6` sibling at `0x80940`), each
+  with one caller that does the 256/216 choice (4G osos `0xB542C`, photo `0xD05C8`).
 - **aupd encryption = RC4 (`aupd_rc4_key`)**: every image starts with a 512-byte security block (the
   sector at the directory's devOffset, before the data); for aupd it hides a 4-byte RC4 key behind 8
   marker words at word offsets `0x5, 0x25, 0x6F, 0x69, 0x15, 0x4D, 0x40, 0x34` (BadBlox's method,

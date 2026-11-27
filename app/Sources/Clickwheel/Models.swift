@@ -70,7 +70,6 @@ enum PatchID: String, CaseIterable, Identifiable {
         switch self {
         case .logo: return model == .photo || model == .g5
         case .dnd: return model == .photo || model == .g5
-        case .volume: return model == .g5
         default: return true
         }
     }
@@ -145,7 +144,7 @@ enum PatchID: String, CaseIterable, Identifiable {
         case .producers: return "Renames the English Composers menu to Producers (5 strings, same length)."
         case .logo: return "Flips the boot logo, or puts your own BMP there, in the encrypted aupd image (same size); the iPod copies it into its boot ROM at the next start."
         case .dnd: return "Replaces the 100×100 picture (iPodWizard index 97 on the iPod photo, 372 on the iPod Video) with your BMP; Apple's original is saved first so it can be put back."
-        case .volume: return "The volume-cap check (osos 0xA0348) always answers no: and r0, r0, #1 becomes #0 (2 bytes, checksum unchanged)."
+        case .volume: return "The volume-cap check (which sets the maximum to 216 instead of 256) always answers no: and r0, r0, #1 becomes #0 (2 bytes, checksum unchanged)."
         }
     }
 }
