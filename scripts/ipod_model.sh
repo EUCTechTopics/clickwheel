@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Read-only: print which supported model a firmware partition belongs to: 4g, 5g, photo or unknown.
+# Read-only: print which supported model a firmware partition belongs to: 4g, 5g, 55g, photo or unknown.
 # Uses SysInfo (BoardHwName) when the iPod's data volume is mounted, else the partition size.
 # Usage: scripts/ipod_model.sh diskNsM
 set -uo pipefail
@@ -13,6 +13,6 @@ fi
 case "$BOARD" in
   "iPod Q21") echo 4g ;;
   "iPod P98") echo photo ;;
-  "") case "$SIZE" in 67108864) echo 5g ;; *) echo unknown ;; esac ;;
+  "") case "$SIZE" in 67108864) echo 5g ;; 167772160) echo 55g ;; *) echo unknown ;; esac ;;
   *) echo unknown ;;
 esac

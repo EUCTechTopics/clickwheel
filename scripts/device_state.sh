@@ -2,14 +2,15 @@
 # Read-only: report which patches are on the iPod right now. Reads the firmware partition into a
 # temporary file, runs `patch.py --check` on it and deletes the file. Never writes to the iPod and
 # doesn't unmount it (the firmware partition is never mounted).
-# Usage: sudo scripts/device_state.sh MODEL diskNsM [--json]      MODEL: 4g, 5g or photo
+# Usage: sudo scripts/device_state.sh MODEL diskNsM [--json]      MODEL: 4g, 5g, 55g or photo
 set -euo pipefail
 ROOT=${0:A:h:h}
-[[ $# -ge 2 ]] || { echo "usage: sudo $0 4g|5g|photo diskNsM [--json]"; exit 1; }
+[[ $# -ge 2 ]] || { echo "usage: sudo $0 4g|5g|55g|photo diskNsM [--json]"; exit 1; }
 MODEL=$1; PART=$2; DISK=${PART%s*}; shift 2
 case "$MODEL" in
   4g|photo) EXPECTED=33554432 ;;
   5g) EXPECTED=67108864 ;;
+  55g) EXPECTED=167772160 ;;
   *) echo "ABORT: unknown model $MODEL"; exit 1 ;;
 esac
 diskutil info "$DISK" | grep -q "Media Name:.*iPod" || { echo "ABORT: $DISK is not an iPod"; exit 1; }

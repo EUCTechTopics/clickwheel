@@ -4,19 +4,21 @@
 Usage: python3 scripts/library.py /Volumes/iPod [--json]
 
 Reads iPod_Control/iTunes/iTunesDB (never writes anything) and prints, per genre (what the Labels
-patch shows as a label), the composers and artists in it with their albums. Songs without a genre
-are left out.
+patch shows as a label), the composers and artists in it with their albums (songs without a genre
+are left out there), and every song with its title, artist, composer, album, genre and track/disc
+number (for the preview's Songs menu and album lists).
 
 iTunesDB layout used here: chunks start with a 4-byte tag and u32 header length; 'mhbd' (database)
 holds 'mhsd' sections, type 1 = tracks, which hold an 'mhlt' list of 'mhit' tracks. Each 'mhit'
 (u32 total length at +8, u32 number of strings at +12) is followed by its 'mhod' strings: u32 type at
 +12, u32 byte length at +28, text at +40 (UTF-16LE; UTF-8 when the u32 at +32 is 2).
-Types: 3 album, 4 artist, 5 genre, 12 composer.
+Types: 1 title, 3 album, 4 artist, 5 genre, 12 composer. In 'mhit': u32 track number at +44, u32 disc
+number at +92.
 """
 import json, os, struct, sys
 from collections import Counter, defaultdict
 
-FIELDS = {3: 'album', 4: 'artist', 5: 'genre', 12: 'composer'}
+FIELDS = {1: 'title', 3: 'album', 4: 'artist', 5: 'genre', 12: 'composer'}
 
 
 def tracks(db):
@@ -36,6 +38,9 @@ def tracks(db):
                     return
                 ihlen, itotal, nstr = struct.unpack_from('<III', db, p + 4)
                 t, q = {}, p + ihlen
+                if ihlen >= 96:
+                    t['track'] = struct.unpack_from('<I', db, p + 44)[0]
+                    t['disc'] = struct.unpack_from('<I', db, p + 92)[0]
                 for _ in range(nstr):
                     if db[q:q + 4] != b'mhod':
                         break
@@ -78,7 +83,9 @@ def main():
         sys.exit(f'ERROR: cannot read {path}: {e.strerror}')
     genres = summary(db)
     if '--json' in sys.argv:
-        print(json.dumps({'ok': True, 'genres': genres[:500]}))
+        keys = ('title', 'artist', 'composer', 'album', 'genre', 'track', 'disc')
+        songs = [{k: t[k] for k in keys if t.get(k)} for t in tracks(db) if t.get('title')][:30000]
+        print(json.dumps({'ok': True, 'genres': genres[:500], 'songs': songs}))
         return
     for g in genres[:40]:
         print(f'{g["name"]} ({g["songs"]} songs): composers {len(g["composers"])}, artists {len(g["artists"])}')

@@ -157,6 +157,10 @@ python3 scripts/patch.py --5g --labels --composers     # -> firmware/ipod5g_fw_p
 sudo scripts/write_fw_5g.sh diskNs2                    # writes only the sectors that differ
 ```
 
+An **iPod Video 5.5th gen** has the same firmware, but its disk uses 2048-byte sectors and a 160 MiB
+firmware partition. Use `--55g` and the `_55g` scripts (`backup_fw_55g.sh`, `write_fw_55g.sh`,
+`rollback_fw_55g.sh`); all the iPod Video tweaks are available. Not yet tested on a device.
+
 On an **iPod photo / iPod color** (firmware 1.2.1), use `--photo` and the `_photo` scripts:
 
 ```sh
@@ -257,6 +261,13 @@ hibernation image, so 5G images are written with `write_fw_5g.sh`, which writes 
 sectors that differ (all inside `osos`) and leaves the rest alone. Undo with
 `sudo scripts/rollback_fw_5g.sh diskNs2`.
 
+**iPod Video 5.5th gen (`--55g`)**: a 160 MiB partition with 2048-byte sectors. Each image starts one
+2048-byte sector after its directory offset (512 bytes on the others), so `osos` sits at `0x5000`
+(5G: `0x4600`) and `aupd` at `0xC3C800` (5G: `0xC3A400`). Their contents are byte-identical to the
+5G's: every osos offset above moves by `+0xA00`, the boot logo by `+0x2400` (`0xCFC208`). aupd's RC4
+key is hidden the same way, except that the sum runs over the whole 2048-byte security sector. Writes
+go in whole 2048-byte sectors.
+
 ### iPod photo / iPod color: `--photo`
 
 All three patches, for firmware 1.2.1 (`osos` image `0x523514` bytes, checksum `0x1DE43EC5` stock).
@@ -315,12 +326,13 @@ A Finder/iTunes **firmware update or restore** removes the patches. Just run the
 │   ├── write_fw.sh           # sudo: write an image, read it back and compare
 │   ├── rollback_fw.sh        # sudo: write the original backup back
 │   ├── *_5g.sh               # sudo: iPod Video backup / write / rollback
+│   ├── *_55g.sh              # sudo: iPod Video 5.5G backup / write / rollback (2048-byte sectors)
 │   ├── *_photo.sh            # sudo: iPod photo backup / write / rollback
 │   ├── ipod_model.sh         # read-only: which model is this partition?
 │   ├── device_state.sh       # sudo, read-only: which patches are on the iPod now?
 │   ├── same_model.py         # read-only: device and image are the same model (4G write)
 │   ├── library.py            # read-only: the iPod's music per label, for the app's preview
-│   └── write_sectors.py      # helper: write only the sectors that differ (5G, photo)
+│   └── write_sectors.py      # helper: write only the sectors that differ (5G, 5.5G, photo)
 ├── app/                      # Clickwheel.app (SwiftUI); build with app/build_app.sh
 ├── docs/REVERSE_ENGINEERING.md
 └── firmware/                 # your dumps and outputs (git-ignored)

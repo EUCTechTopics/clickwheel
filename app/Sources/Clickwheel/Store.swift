@@ -44,6 +44,7 @@ final class AppState {
     var previewMode: PreviewMode = .menus
     /// The iPod's own music (read-only from its iTunesDB), so the preview shows the user's labels.
     var music: [LibraryReport.Genre]?
+    var songs: [LibraryReport.Song]?
     private var musicFrom: String?
     var built: PatchReport?
     /// The image just written and verified; nil again once the user changes a switch.
@@ -221,8 +222,9 @@ final class AppState {
             let otherIPod = dev != nil && (dev?.serial != lastSerial || dev?.model != lastModel)
             device = dev
             if let dev {
-                if otherIPod && lastSerial != nil { check = nil; plan = nil; built = nil; flashed = nil; customPictures = [:]; ownPicture = []; mirrored = []
-                    music = nil; musicFrom = nil }
+                // (lastModel: iPod Videos often have no serial in SysInfo; a model change is another iPod too)
+                if otherIPod && (lastSerial != nil || lastModel != nil) { check = nil; plan = nil; built = nil; flashed = nil; customPictures = [:]; ownPicture = []; mirrored = []
+                    music = nil; songs = nil; musicFrom = nil }
                 lastSerial = dev.serial; lastModel = dev.model
                 await loadMusic()
             }
@@ -313,14 +315,22 @@ final class AppState {
 
     // MARK: the iPod's music (read-only, for the preview)
 
-    /// Read the library on the iPod's data volume once per mount; kept while it's unmounted for Apply.
+    /// Read the library on the iPod's data volume once per iPod and database version; kept while it's
+    /// unmounted for Apply. Keyed by disk, mount point and the iTunesDB's date and size, since two iPods
+    /// without a serial both mount as /Volumes/iPod.
     private func loadMusic() async {
-        guard let repo, let mp = device?.mountPoint, mp != musicFrom else { return }
+        guard let repo, let d = device, let mp = d.mountPoint else { return }
+        let db = (try? FileManager.default.attributesOfItem(atPath: mp + "/iPod_Control/iTunes/iTunesDB")) ?? [:]
+        let key = [d.disk, d.partition, mp, d.model?.rawValue ?? "",
+                   "\((db[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)", "\((db[.size] as? Int) ?? 0)"]
+            .joined(separator: "|")
+        guard key != musicFrom else { return }
         let r = await Runner.run("/usr/bin/env", ["python3", "-I", "scripts/library.py", mp, "--json"], cwd: repo)
-        guard let rep = try? JSONDecoder().decode(LibraryReport.self, from: Data(r.stdout.utf8)), rep.ok,
-              let g = rep.genres, !g.isEmpty else { return }
-        musicFrom = mp
-        music = g
+        guard let rep = try? JSONDecoder().decode(LibraryReport.self, from: Data(r.stdout.utf8)), rep.ok else { return }
+        musicFrom = key
+        let g = rep.genres ?? []
+        music = g.isEmpty ? nil : g          // no songs with a genre: the preview shows its examples
+        songs = g.isEmpty ? nil : rep.songs
         info("read the iPod's music library for the preview: \(g.count) genres/labels")
     }
 

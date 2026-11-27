@@ -9,7 +9,7 @@ This script never opens the device itself.
   write_fd.py write   MODEL diskNsM TO.bin FROM.bin     < /dev/rdiskNsM (read-write)
 
 FROM is the iPod's firmware as it is now (the app reads it right before, with backup_fd.py dump);
-TO is the image built from it by patch.py. Only the 512-byte sectors in which they differ are
+TO is the image built from it by patch.py. Only the sectors (512 bytes; 2048 on the 5.5G) in which they differ are
 written (write_sectors.apply), all inside the osos area, or inside the aupd image for a change there
 (the iPod photo's boot logo); every other byte of the partition is left alone. Before writing, the
 iPod must hold FROM (sectors that already hold TO are fine, e.g. after an interrupted run);
@@ -39,7 +39,7 @@ write_sectors = _load("write_sectors")
 die = fd_common.die
 
 ENTRY = 0x4200                       # first image-directory entry (osos), as in patch.py
-SEC = 512
+SEC = 512                            # set per model in write() (2048 on the iPod Video 5.5G)
 
 
 def load_image(path, size):
@@ -60,7 +60,7 @@ def osos_end(img, name):
     if img[0x100:0x104] != b"]ih[" or img[ENTRY + 4:ENTRY + 8] != b"soso":
         die(f"ABORT: {name} has no iPod firmware directory")
     devoff, length = struct.unpack_from("<II", img, ENTRY + 12)
-    end = devoff + 0x200 + length
+    end = devoff + SEC + length          # images start one sector after their directory offset
     return (end + SEC - 1) // SEC * SEC
 
 
@@ -73,7 +73,7 @@ def images(img):
         if not typ.strip(b"\0") or not all(32 < c < 127 for c in typ):
             break
         devoff, length = struct.unpack_from("<II", img, e + 12)
-        out[typ.decode()] = (devoff + 0x200, (devoff + 0x200 + length + SEC - 1) // SEC * SEC)
+        out[typ.decode()] = (devoff + SEC, (devoff + SEC + length + SEC - 1) // SEC * SEC)
     return out
 
 
@@ -107,6 +107,8 @@ def prepare(model, part):
 
 
 def write(model, part, to, frm):
+    global SEC
+    SEC = fd_common.SECTOR.get(model, 512)
     size = fd_common.MODELS[model][1]
     to, frm = os.path.abspath(to), os.path.abspath(frm)
     b = load_image(to, size)
@@ -117,7 +119,7 @@ def write(model, part, to, frm):
     fd_common.check_partition(model, part)
     fd_common.check_handle(part, writable=True)
     print(f"Changing /dev/r{part} from {os.path.basename(frm)} to {os.path.basename(to)}", flush=True)
-    write_sectors.apply(0, a, b, limit, os.path.basename(frm), os.path.basename(to))
+    write_sectors.apply(0, a, b, limit, os.path.basename(frm), os.path.basename(to), SEC)
     print(f"OK: firmware partition now matches {os.path.basename(to)} (up to 0x{limit:x}; rest untouched)", flush=True)
 
 

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Change an iPod firmware partition from image FROM to image TO by writing only the 512-byte
-sectors in which they differ. Used by write_fw_5g.sh / write_fw_photo.sh (run as root) and, via apply(), by write_fd.py.
+"""Change an iPod firmware partition from image FROM to image TO by writing only the sectors in
+which they differ (512 bytes; 2048 on the iPod Video 5.5G, whose disk can only be written in whole
+2048-byte sectors). Used by write_fw_5g.sh / write_fw_55g.sh / write_fw_photo.sh (run as root) and,
+via apply(), by write_fd.py.
 
-Usage: write_sectors.py FROM.bin TO.bin /dev/rdiskNsM LIMIT
+Usage: write_sectors.py FROM.bin TO.bin /dev/rdiskNsM LIMIT [SECTOR]
 
 Safety:
 - every differing sector must lie below LIMIT (the end of the osos image, or of the aupd image for
@@ -28,10 +30,11 @@ def read_region(fd, limit):
         pos += n
     return bytes(out)
 
-def apply(fd, a, b, limit, src_name, dst_name):
+def apply(fd, a, b, limit, src_name, dst_name, sec=512):
     """Change the device behind the open descriptor fd from image bytes a to image bytes b
     (see the module docstring for the checks). Exits with an ABORT/MISMATCH message on failure."""
-    if len(a) != len(b) or limit % SEC or limit > len(a):
+    SEC = sec
+    if SEC not in (512, 2048) or len(a) != len(b) or limit % SEC or limit > len(a):
         sys.exit('ABORT: images differ in size or bad limit')
     diff = [s for s in range(0, len(a), SEC) if a[s:s + SEC] != b[s:s + SEC]]
     if not diff:
@@ -65,14 +68,15 @@ def apply(fd, a, b, limit, src_name, dst_name):
     print(f'readback of 0x0-0x{limit:x} matches {dst_name}', flush=True)
 
 def main():
-    if len(sys.argv) != 5:
+    if len(sys.argv) not in (5, 6):
         sys.exit(__doc__)
     src, dst, dev, limit = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4], 0)
+    sec = int(sys.argv[5]) if len(sys.argv) == 6 else SEC
     a = open(src, 'rb').read()
     b = open(dst, 'rb').read()
     fd = os.open(dev, os.O_RDWR)
     try:
-        apply(fd, a, b, limit, os.path.basename(src), os.path.basename(dst))
+        apply(fd, a, b, limit, os.path.basename(src), os.path.basename(dst), sec)
     finally:
         os.close(fd)
 

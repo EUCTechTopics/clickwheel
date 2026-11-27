@@ -6,6 +6,12 @@ This repo patches the Apple firmware of click-wheel iPods. It supports three mod
 - **iPod Video (5th generation)**, one firmware build (`osos` 0x735A00 bytes): **tested on a device**.
 - **iPod photo / iPod color** ("iPod P98") with firmware 1.2.1 (buildID 4.2.1): **tested on a device**
   (MA079, all three patches).
+- **iPod Video 5.5th generation**: the same firmware as the 5G (osos and aupd byte-identical), but a
+  160 MiB (167,772,160-byte) `Apple_MDFW` partition with **2048-byte sectors**: images start one 2048-byte
+  sector after their directory offset (osos `0x5000`, aupd `0xC3C800`), the aupd RC4 sum runs over the
+  whole 2048-byte security sector, and writes go in whole 2048-byte sectors. `--55g` (model `55g`),
+  scripts `backup_fw_55g.sh`, `write_fw_55g.sh`, `rollback_fw_55g.sh`; the app supports it. **Not yet
+  tested on a device** (checked on a backup of the user's 5.5G and on a file standing in for the disk).
 
 The patches, available on all models, are:
 
@@ -89,7 +95,8 @@ Run `scripts/ipod_info.sh`. Confirm with the user:
 
 If `ipod_info.sh` reports a partition that isn't 33,554,432 bytes, check with
 `diskutil list external` and `diskutil info diskNs2`. A **67,108,864-byte** `Apple_MDFW` partition
-means an iPod Video (5G), whose SysInfo may be empty. Continue with the 5G workflow at the end of
+means an iPod Video (5G), whose SysInfo may be empty; a **167,772,160-byte** one (2048-byte blocks) an
+iPod Video 5.5G. Continue with the 5G workflow at the end of
 this file.
 
 If SysInfo isn't shown, the data volume isn't mounted. Ask the user to reconnect the iPod or
@@ -169,6 +176,9 @@ Same workflow and the same rules, with these differences:
   (the partition also holds a hibernation image, which must be left alone).
 - Undo: `! sudo scripts/rollback_fw_5g.sh diskNs2`.
 - Reboot and test as for the 4G.
+- **5.5G** (160 MiB partition, `ipod_model.sh` says `55g`): the same with `--55g` and the `_55g` scripts
+  (`firmware/ipod55g_fw_backup.bin`). `!` can't prompt for a sudo password: ask the user to run the
+  sudo scripts in Terminal.app (`cd` to the repo first).
 
 ### iPod photo / iPod color
 Same workflow and the same rules. The 4G scripts refuse an iPod photo (same 32 MiB partition), so:

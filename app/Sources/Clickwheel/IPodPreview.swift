@@ -10,6 +10,8 @@ struct IPodPreview: View {
     var picture: NSImage?
     /// The iPod's own music; examples are used when it can't be read.
     var music: [LibraryReport.Genre]?
+    /// The iPod's songs (nil with the examples): the Songs menu and the songs of an album.
+    var songs: [LibraryReport.Song]?
 
     /// Where the user is: the menus from the main menu down (MENU pops, the centre button pushes).
     @State private var stack: [Node] = [.root, .music]
@@ -41,6 +43,34 @@ struct IPodPreview: View {
         case labelPeople(label: Int)                          // a genre's artists (composers when patched); 0 = All
         case people(composers: Bool)                          // Music ▸ Artists / Composers
         case albums(label: Int?, composers: Bool, person: Int) // a person's albums; person 0 = All
+        case songs(SongFilter)                                // songs (of a genre, person and/or album)
+    }
+
+    /// Which songs a song list shows; nil = any.
+    struct SongFilter: Hashable {
+        var genre: String? = nil
+        var person: String? = nil
+        var composers = false                                 // person is the composer, else the artist
+        var album: String? = nil
+    }
+
+    private func songs(_ f: SongFilter) -> [LibraryReport.Song] {
+        let list = (songs ?? []).filter { s in
+            (f.genre == nil || s.genre == f.genre) && (f.album == nil || s.album == f.album)
+                && (f.person == nil || (f.composers ? s.composer : s.artist) == f.person)
+        }
+        if f.album != nil {                                   // an album plays in disc and track order
+            return list.sorted { ($0.disc ?? 0, $0.track ?? 0, Self.sortKey($0.title)) < ($1.disc ?? 0, $1.track ?? 0, Self.sortKey($1.title)) }
+        }
+        return list.sorted { Self.sortKey($0.title).localizedStandardCompare(Self.sortKey($1.title)) == .orderedAscending }
+    }
+    /// The filter for row `i` of an albums list (0 = All: every song of those people).
+    private func albumFilter(label l: Int?, composers c: Bool, person p: Int, row i: Int) -> SongFilter {
+        let ls = labels, ps = people(label: l, composers: c)
+        let genre = l == nil || l == 0 ? nil : ls[min(l! - 1, ls.count - 1)].name
+        let person = p == 0 || ps.isEmpty ? nil : ps[min(p - 1, ps.count - 1)].name
+        let al = albums(of: ps, p)
+        return SongFilter(genre: genre, person: person, composers: c, album: i == 0 || al.isEmpty ? nil : al[min(i - 1, al.count - 1)])
     }
 
     /// Example music when the iPod's own library isn't available.
@@ -114,13 +144,13 @@ struct IPodPreview: View {
 
     private var rootItems: [String] {
         switch model {
-        case .g5: return ["Music", "Photos", "Videos", "Extras", "Settings", "Shuffle Songs", "Backlight"]
+        case .g5, .g55: return ["Music", "Photos", "Videos", "Extras", "Settings", "Shuffle Songs", "Backlight"]
         case .photo: return ["Music", "Photos", "Extras", "Settings", "Shuffle Songs", "Backlight"]
         default: return ["Music", "Extras", "Settings", "Shuffle Songs", "Backlight"]
         }
     }
     private var musicItems: [String] {
-        ["Playlists", "Artists", "Albums", "Songs", genre, composer, "Audiobooks"] + (model == .g5 ? ["Search"] : [])
+        ["Playlists", "Artists", "Albums", "Songs", genre, composer, "Audiobooks"] + (model?.isVideo == true ? ["Search"] : [])
     }
     /// Podcasts is left out, so Genres/Labels and Composers/Producers fit on the first screen.
     private static let genreRow = 4
@@ -131,7 +161,7 @@ struct IPodPreview: View {
         case .root: return Screen(title: "iPod", items: rootItems, sel: 0)
         case .music: return Screen(title: "Music", items: musicItems, sel: Self.genreRow)
         case .extras:
-            return Screen(title: "Extras", items: ["Clock", "Contacts", "Calendar", "Notes", "Games"] + (model == .g5 ? ["Stopwatch", "Screen Lock"] : []), sel: 0)
+            return Screen(title: "Extras", items: ["Clock", "Contacts", "Calendar", "Notes", "Games"] + (model?.isVideo == true ? ["Stopwatch", "Screen Lock"] : []), sel: 0)
         case .settings:
             return Screen(title: "Settings", items: ["About", "Shuffle", "Repeat", "Volume Limit", "Backlight Timer"]
                           + (model == .g4 ? [] : ["Brightness"])
@@ -152,6 +182,8 @@ struct IPodPreview: View {
             let ps = people(label: l, composers: c), al = albums(of: ps, p)
             return Screen(title: p == 0 || ps.isEmpty ? (c ? composer : "Artists") : ps[min(p - 1, ps.count - 1)].name,
                           items: ["All"] + al, sel: al.isEmpty ? 0 : 1)
+        case .songs(let f):
+            return Screen(title: f.album ?? f.person ?? f.genre ?? "Songs", items: songs(f).map(\.title), sel: 0)
         }
     }
 
@@ -165,6 +197,7 @@ struct IPodPreview: View {
             case 0: return .playlists
             case 1: return .people(composers: false)
             case 2: return .allAlbums
+            case 3: return songs?.isEmpty == false ? .songs(SongFilter()) : nil
             case Self.genreRow: return .labels
             case Self.genreRow + 1: return .people(composers: true)
             default: return nil
@@ -174,6 +207,14 @@ struct IPodPreview: View {
             return people(label: l, composers: drillsToComposers).isEmpty ? nil : .albums(label: l, composers: drillsToComposers, person: i)
         case .people(let c):
             return people(label: nil, composers: c).isEmpty ? nil : .albums(label: nil, composers: c, person: i)
+        case .albums(let l, let c, let p):
+            let f = albumFilter(label: l, composers: c, person: p, row: i)
+            return songs(f).isEmpty ? nil : .songs(f)
+        case .allAlbums:
+            let al = screen(.allAlbums).items
+            guard al.indices.contains(i) else { return nil }
+            let f = SongFilter(album: al[i])
+            return songs(f).isEmpty ? nil : .songs(f)
         default: return nil
         }
     }
@@ -197,6 +238,7 @@ struct IPodPreview: View {
         case .labelPeople: return drillsToComposers ? composer : "Artists"
         case .people(let c): return c ? composer : "Artists"
         case .albums, .allAlbums: return "Albums"
+        case .songs: return "Songs"
         }
     }
 
@@ -254,7 +296,7 @@ struct IPodPreview: View {
 
     // MARK: device drawing
 
-    private var dark: Bool { model == .g5 && bodyDark }
+    private var dark: Bool { model?.isVideo == true && bodyDark }
 
     private var device: some View {
         GeometryReader { g in
@@ -276,7 +318,7 @@ struct IPodPreview: View {
                 .padding(.top, h * 0.07)
             }
         }
-        .onTapGesture { if model == .g5 { withAnimation { bodyDark.toggle() } } }
+        .onTapGesture { if model?.isVideo == true { withAnimation { bodyDark.toggle() } } }
     }
 
     @ViewBuilder private var lcd: some View {
@@ -479,7 +521,7 @@ struct PreviewColumn: View {
             IPodPreview(model: state.model, patches: state.selected, patched: !state.selected.isEmpty,
                         mode: modes.contains(state.previewMode) ? state.previewMode : .menus,
                         picture: state.previewMode.patch.flatMap { state.previewPictures[$0] },
-                        music: state.music)
+                        music: state.music, songs: state.songs)
                 .help(state.previewMode == .menus
                       ? "Try it: drag around the wheel, click the centre button, press MENU to go back."
                       : "How the iPod will look after Apply.")

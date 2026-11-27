@@ -4,6 +4,7 @@
 Supported (--model, default 4g):
   4g     iPod 4th gen click wheel (iPod Q21), firmware 3.1.1
   5g     iPod Video 5th gen, the build in the user's backup          (--5g is short for --model 5g)
+  55g    iPod Video 5.5th gen: the same osos and aupd as 5g, laid out in 2048-byte sectors (160 MiB partition)
   photo  iPod photo / iPod color (iPod P98), firmware 1.2.1 (4.2.1)  (--photo is short for --model photo)
 
 Usage:
@@ -204,6 +205,38 @@ MODELS = {
     },
 }
 
+def _shifted(base, name, part_size, osos_len, files, osos_delta, aupd_delta):
+    """A model whose osos and aupd hold exactly the same bytes as `base`'s, at other partition offsets
+    (the image directory itself, with the checksum fields and the aupd flag, stays at 0x4200)."""
+    import copy
+    m = copy.deepcopy(base)
+    m.update({'name': name, 'part_size': part_size, 'osos_len': osos_len, 'input': files[0], 'output': files[1]})
+    for p in m['patches'].values():
+        if 'edits' in p:
+            p['edits'] = [(o + osos_delta, old, new) for o, old, new in p['edits']]
+        p['context'] = [(a + osos_delta, pre, b + osos_delta, post) for a, pre, b, post in p.get('context', [])]
+        if 'picture' in p:
+            p['picture']['header'] += osos_delta
+        if 'cipher' in p:
+            x = p['cipher']
+            x['offset'] += aupd_delta
+            for k in ('wizard_flip', 'legacy_stock_sha256'):   # those exist only for the 5G user's own dumps
+                x.pop(k, None)
+    return m
+
+# iPod Video 5.5G: the 160 MiB partition uses 2048-byte sectors, so every image starts one 2048-byte
+# sector after its directory offset (0x200 on the others); osos (0x5000, not 0x4600) and aupd
+# (0xC3C800, not 0xC3A400) hold byte-identical contents to the 5G's 1.3 build (checked on a 5.5G
+# dump: osos identical to 5G stock, aupd decrypts to the 5G's plaintext with the same checksum).
+MODELS['55g'] = _shifted(MODELS['5g'], 'iPod Video 5.5G (osos 0x735A00 bytes, 2048-byte sectors)',
+                         167772160, 0x736000, ('ipod55g_fw_backup.bin', 'ipod55g_fw_patched.bin'),
+                         0x5000 - 0x4600, 0xC3C800 - 0xC3A400)
+MODELS['55g']['sector'] = 0x800
+
+def sector(buf):
+    """Sector size of a firmware partition: 2048 bytes for the 5.5G's 160 MiB partition, else 512."""
+    return next((m.get('sector', 0x200) for m in MODELS.values() if m['part_size'] == len(buf) and 'sector' in m), 0x200)
+
 JSON = False
 
 
@@ -229,8 +262,9 @@ def patchdata(name, size, sha):
     return d
 
 def aupd_rc4_key(sec):
-    """The 4-byte RC4 key hidden in an image's 512-byte security block (the sector before its data), or
-    None when no marker is enabled. BadBlox's method (ipodlinux.org wiki "Flash Decryption")."""
+    """The 4-byte RC4 key hidden in an image's security block (the sector before its data: 512 bytes, or
+    2048 on the 5.5G, where the sum runs over the whole 2048 bytes), or None when no marker is enabled.
+    BadBlox's method (ipodlinux.org wiki "Flash Decryption")."""
     M = 0xFFFFFFFF
     offs = (0x5, 0x25, 0x6F, 0x69, 0x15, 0x4D, 0x40, 0x34)
     word = lambda p: struct.unpack_from('<I', sec, p)[0]
@@ -244,7 +278,7 @@ def aupd_rc4_key(sec):
             continue
         key = m ^ word(offs[i + 1] * 4 + 8) ^ 0x54C3A298
         r1 = 0x6F
-        for n in range(2, 128, 2):
+        for n in range(2, len(sec) // 4, 2):
             a, b = word(n * 4), word(n * 4 + 4)
             r1 = ((r1 ^ (a | b >> 16)) + ((a & 0xFFFF) | b)) & M
         return struct.pack('<I', key ^ r1)
@@ -281,7 +315,7 @@ def image_stream(buf, x):
     img = {i['type']: i for i in images(buf)}.get(x['image'])
     if not img:
         return None
-    sec = bytes(buf[img['offset'] - 0x200:img['offset']])
+    sec = bytes(buf[img['offset'] - sector(buf):img['offset']])     # the sector before the data
     key = aupd_rc4_key(sec)
     if key is None:
         return None
@@ -441,7 +475,7 @@ def osos_info(buf, m):
     if (dir_off, ver) != (0x4000, 3) or buf[ENTRY + 4:ENTRY + 8] != b'soso':
         fail(f'unexpected image directory (dir_off=0x{dir_off:x}, version={ver})')
     devoff, length = struct.unpack_from('<II', buf, ENTRY + 12)
-    start = devoff + 0x200
+    start = devoff + sector(buf)
     if length != m['osos_len']:
         other = [k for k, v in MODELS.items() if v['osos_len'] == length]
         hint = f' (it matches --model {other[0]})' if other else ''
@@ -461,7 +495,7 @@ def images(buf):
         if not typ.strip(b'\0') or not all(32 < c < 127 for c in typ):
             break
         devoff, length = struct.unpack_from('<II', buf, e + 12)
-        out.append({'type': typ.decode(), 'offset': devoff + 0x200, 'length': length})
+        out.append({'type': typ.decode(), 'offset': devoff + sector(buf), 'length': length})
     return out
 
 def state(buf, p):
@@ -509,6 +543,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--model', choices=sorted(MODELS), help='firmware model (default 4g)')
     ap.add_argument('--5g', dest='g5', action='store_true', help='short for --model 5g')
+    ap.add_argument('--55g', dest='g55', action='store_true', help='short for --model 55g')
     ap.add_argument('--photo', action='store_true', help='short for --model photo')
     ap.add_argument('-i', '--input')
     ap.add_argument('-o', '--output')
@@ -536,7 +571,7 @@ def main():
     ap.add_argument('--find', metavar='TEXT', help='read-only: list every occurrence of TEXT in the osos image')
     a = ap.parse_args()
     JSON = a.json
-    picked = [k for k, on in (('5g', a.g5), ('photo', a.photo)) if on] + ([a.model] if a.model else [])
+    picked = [k for k, on in (('5g', a.g5), ('55g', a.g55), ('photo', a.photo)) if on] + ([a.model] if a.model else [])
     if len(set(picked)) > 1:
         fail(f'conflicting models: {", ".join(sorted(set(picked)))}')
     model = picked[0] if picked else '4g'
