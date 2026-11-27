@@ -65,9 +65,12 @@ enum PatchID: String, CaseIterable, Identifiable {
     }
     /// Turning it on asks for a picture file (a BMP of `pictureSize`).
     var takesPicture: Bool { self == .dnd }
-    /// Option-click on the switch uses your own picture instead (the boot logo on the iPod photo).
-    func ownPictureOptional(on model: IPodModel?) -> Bool { self == .logo && model == .photo }
-    var pictureSize: (width: Int, height: Int) { self == .logo ? (78, 100) : (100, 100) }
+    /// Option-click on the switch uses your own picture instead (the boot logo on the iPod photo and Video).
+    func ownPictureOptional(on model: IPodModel?) -> Bool { self == .logo && (model == .photo || model == .g5) }
+    /// Size of the BMP this change takes: the boot logo is 78×100 on the iPod photo, 62×78 on the iPod Video.
+    func pictureSize(on model: IPodModel?) -> (width: Int, height: Int) {
+        self == .logo ? (model == .g5 ? (62, 78) : (78, 100)) : (100, 100)
+    }
     /// patch.py option that takes the picture file (or "keep").
     var pictureFlag: String { self == .logo ? "--logo-image" : flag }
     var title: String {
@@ -122,7 +125,7 @@ enum PatchID: String, CaseIterable, Identifiable {
         case .labels: return "Renames the English Genres menu to Labels (5 strings, same length)."
         case .composers: return "Picking a label opens its Composers instead of its Artists (1 bytecode operand)."
         case .producers: return "Renames the English Composers menu to Producers (5 strings, same length)."
-        case .logo: return "Flips the boot logo in the aupd image (same size); the iPod copies it into its boot ROM at the next start."
+        case .logo: return "Flips the boot logo, or puts your own BMP there, in the encrypted aupd image (same size); the iPod copies it into its boot ROM at the next start."
         case .dnd: return "Replaces the 100×100 picture (iPodWizard index 97 on the iPod photo, 372 on the iPod Video) with your BMP; Apple's original is saved first so it can be put back."
         }
     }

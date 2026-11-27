@@ -246,7 +246,7 @@ struct ChangeRow: View {
                         Button("Choose Another…") { choose() }.controlSize(.small)
                     }
                 } else if patch.ownPictureOptional(on: state.model) {
-                    Text("Option-click the switch to use your own \(patch.pictureSize.width)×\(patch.pictureSize.height) BMP instead.")
+                    Text("Option-click the switch to use your own \(patch.pictureSize(on: state.model).width)×\(patch.pictureSize(on: state.model).height) BMP instead.")
                         .font(.caption).foregroundStyle(.tertiary)
                 }
             }
@@ -281,7 +281,7 @@ struct ChangeRow: View {
         panel.allowedContentTypes = [.bmp]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        let size = patch.pictureSize
+        let size = patch.pictureSize(on: state.model)
         panel.message = "Choose a \(size.width)×\(size.height) BMP picture"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard let (w, h) = bmpSize(url), (w, h) == (size.width, size.height) else {

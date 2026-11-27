@@ -32,7 +32,7 @@ All patches are tiny in-place byte changes, and you can pick any combination:
 | `--composers` | Picking a label shows Composers instead of Artists | 1 byte |
 | `--producers` | *Composers* → *Producers* (English menus) | 5 strings |
 | `--logo` | iPod photo / color and iPod Video: the boot Apple logo upside down (it lives in the `aupd` image; tested on both) | 15,600 / 9,552 bytes |
-| `--logo-image FILE.bmp` | iPod photo / color: your own boot logo (78×100 BMP) instead of the flipped Apple. Apple's logo is saved first (`originals/`), so switching it off puts it back | 15,600 bytes |
+| `--logo-image FILE.bmp` | iPod photo / color (78×100 BMP) and iPod Video (62×78 BMP, not yet tested on a device): your own boot logo instead of the flipped Apple. Apple's logo is saved first (`originals/`), so switching it off puts it back | 15,600 / 9,672 bytes |
 | `--dnd FILE.bmp` | iPod photo / color and iPod Video: your own *Do not disconnect* picture (100×100 BMP, 16- or 24-bit). Apple's original is saved next to the input (`originals/`) first, so switching it off puts it back | 20,000 bytes |
 
 The image checksum is recalculated in every case.
@@ -329,7 +329,7 @@ content-checked patches, and Claude Code as the guide.
 - [x] Native Mac app (Clickwheel.app) with diff view, partition map and live menu preview
 - [x] Boot logo upside down on the iPod photo and the iPod Video; your own boot logo on the iPod photo
 - [x] Your own "Do not disconnect" picture on the iPod photo and the iPod Video (not yet tested on a device)
-- [ ] **Your own boot logo on the iPod Video** (next up; see [`docs/ROADMAP.md`](docs/ROADMAP.md))
+- [x] Your own boot logo on the iPod Video (built; not yet tested on a device)
 - [ ] **Custom renames:** `--rename OLD=NEW` for any English menu string that fits its slot,
       with the same content checks
 - [ ] Patch catalogue as data (one file per model/firmware) instead of code

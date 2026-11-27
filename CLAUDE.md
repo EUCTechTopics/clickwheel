@@ -25,10 +25,13 @@ The patches, available on all models, are:
      `originals/photo-logo.bin` before it is replaced, so it can be put back. Builds reproduce the
      iPodWizard flipped and custom dumps byte for byte (apart from the flag below). In the app,
      Option-click on the logo switch picks the user's own BMP.
-   - **iPod Video**: not a plain XOR, so only flip/unflip, by mapping the exact stock bytes to the
-     exact iPodWizard-flipped bytes (`scripts/patchdata/5g_logo.xor`) and switching the checksum field
-     between the two known values. Another picture there reports `custom`, is left alone by `--exact`,
-     and `--logo` refuses to touch it.
+   - **iPod Video**: aupd is RC4-encrypted with a 4-byte key hidden in its 512-byte security block
+     (the sector before its data; `aupd_rc4_key` in `patch.py`). The logo is 62×78 RGB565 after a
+     `LoGo` header; the aupd checksum (`0x426C`) is the byte sum of the decrypted aupd. Same states and
+     options as the photo: `--logo`, `--logo-image FILE.bmp` (62×78) or `keep`, Apple's logo saved to
+     `originals/5g-logo.bin`. iPodWizard's flip (a few pixels 1 colour step off) counts as `applied`;
+     `scripts/patchdata/5g_logo.xor` turns it back into Apple's exact logo. The flip is tested on a
+     device; the own BMP is **not yet** (checked on copies: on/off is byte-identical).
    A build that changes aupd sets aupd's "flashed" flag (photo `0x4230`, Video `0x4258`) to 0, so the
    iPod copies aupd into its boot ROM at the next start; `--reflash` does only that. The 4G has no
    such patch: flipping its grey 84×100 picture did not change its boot logo (tested).

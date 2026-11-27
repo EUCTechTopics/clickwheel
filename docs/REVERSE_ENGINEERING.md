@@ -249,8 +249,19 @@ Pictures are stored uncompressed inside `osos`, each with a small header followe
   before and after an iPodWizard flip differs only in `0xCF9E5C`–`0xCFC3AB` (9,552 bytes, rows of 124
   bytes) and in aupd's directory entry: the checksum (`0x426C`: `0x0B19DB1C` → `0x0B1A3B5C`) and the
   u32 at `0x4274` (`0xFFFFFFFF` → `0x10000000`, apparently written by the iPod after flashing; the
-  patch leaves it alone). Unlike the photo, the XOR of the two versions is not row-symmetric, so the
-  cipher (or iPodWizard's re-encoding) is not a plain XOR stream; that doesn't matter, because the
-  patch only maps the exact stock bytes to the exact flipped bytes and back. The aupd "flashed" flag
+  patch leaves it alone). The aupd "flashed" flag
   is at `0x4258`. `write_fd.py` lets a write reach to the end of aupd (rsrc is only read back) and
   refuses anything at or beyond hibe. Tested on a device through Clickwheel in both directions.
+- **aupd encryption = RC4 (`aupd_rc4_key`)**: every image starts with a 512-byte security block (the
+  sector at the directory's devOffset, before the data); for aupd it hides a 4-byte RC4 key behind 8
+  marker words at word offsets `0x5, 0x25, 0x6F, 0x69, 0x15, 0x4D, 0x40, 0x34` (BadBlox's method,
+  archived ipodlinux.org wiki page "Flash Decryption"). The RC4 stream starts at the first data byte.
+  Checked: on the photo the derived key (`0xA305E474`) reproduces `photo_logo.key` exactly; on the
+  Video (`0xDB3B26C9`) the decrypted aupd starts with ARM vectors and its byte sum is the stored
+  checksum. Video logo: aupd offset `0xBF9EC` holds a 24-byte header (`oGoL` = "LoGo" byte-reversed,
+  0, u16 height 78, u16 width 62, u16 row bytes 124, u16 52, 0, u32 length 9,672), pixels follow at
+  `0xBFA04` (partition `0xCF9E04`), RGB565 LE, top row first: a white apple on black. The earlier
+  "not row-symmetric" result came from a wrong start offset (the top rows are black, so the diff
+  started later) plus iPodWizard's 24-bit round trip, which moves 1,861 pixels by 1 colour step.
+  `patch.py` accepts the key only when the header decrypts exactly and the decrypted byte sum equals
+  the checksum field.

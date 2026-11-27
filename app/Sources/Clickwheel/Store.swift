@@ -323,8 +323,10 @@ final class AppState {
         }
         if let ds = deviceState {
             selected = Set(ds.applied.compactMap(PatchID.init(rawValue:)))
-            // your own picture (e.g. a boot logo) is on: the switch shows on, with that picture kept
-            ownPicture = Set(patchIDs.filter { $0.ownPictureOptional(on: model) && ds.patches[$0.rawValue] == "custom" })
+            // your own picture (e.g. a boot logo) is on: the switch shows on, with that picture kept; a
+            // picture chosen but not yet written stays chosen (Apply re-reads the iPod before building)
+            ownPicture = Set(patchIDs.filter { $0.ownPictureOptional(on: model)
+                && (ds.patches[$0.rawValue] == "custom" || customPictures[$0] != nil) })
             selected.formUnion(ownPicture)
         }
         await updatePlan()
