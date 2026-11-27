@@ -4,11 +4,11 @@ Features still to build, most important first. Every item follows the same rules
 patches: exact original bytes plus enough context to reject other firmware builds, a build that
 only changes what it says, and a test on a real device before it is marked done.
 
-## 1. Custom boot logo on the iPod Video (5th gen): built, device test pending
+## 1. Custom boot logo on the iPod Video (5th gen): done, tested on a device
 
 aupd turned out to be RC4 with the key in its security block, so no iPodWizard dumps were needed
 (see `docs/REVERSE_ENGINEERING.md`). `--5g --logo-image FILE.bmp` (62×78) and Option-click in the
-app are built and checked on copies (2026-11-27). Left: test on the device, then mark it tested.
+app are built, checked on copies and tested on the user's iPod Video (2026-11-27).
 
 ## 2. Remove the volume limit on the iPod Video (5th gen): done, tested on a device
 
