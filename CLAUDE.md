@@ -43,8 +43,8 @@ The patches, available on all models, are:
    original pixels (checked by sha256) to `originals/photo-dnd.bin` (Video: `5g-dnd.bin`) next to the input (in the app:
    `~/Library/Application Support/Clickwheel/<serial>/originals/`); switching it off needs that file.
    In the app, turning the switch on opens a file picker.
-6. `--volume` (**all three models**; **tested on a device on the iPod Video and the 4G**, not yet on
-   the photo): removes the built-in (European) volume limit. A getter returns bit 0 of a flags word; its
+6. `--volume` (**all three models**; **tested on a device on the iPod Video and the 4G**; the photo
+   is untested: the project's photo is a US unit, which has no cap, so it needs a European one): removes the built-in (European) volume limit. A getter returns bit 0 of a flags word; its
    only user sets the maximum volume to 216 instead of 256 when it's set. The patch turns its
    `and r0,r0,#1` into `and r0,r0,#0`, `01 00` → `00 01` at partition `0xA4950` (Video, getter osos
    `0xA0348`, from a community HxD guide), `0x7DFF0` (4G, getter `0x799E8`) or `0x87880` (photo,
